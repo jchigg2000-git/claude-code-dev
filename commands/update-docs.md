@@ -180,12 +180,12 @@ An unlicensed repo is not automatically a defect. Per the base working agreement
 
 - **No strong signal** → one factual line in the report: *"No license (fine for a local prototype)."* Do not call it a gap, do not offer, do not nag. Same posture as the CI/CD rule.
 - **Any strong signal, running interactively** → surface it and offer the fix. State which signal fired, then ask once via `AskUserQuestion`:
-  - **Apply the operator's commercial license** — invoke the `apply-higgins-license` skill. Proprietary, all rights reserved, holder per that command's current default. Right for commercial wares, client deliverables, and anything closed.
+  - **Keep it closed** — report that the repo wants a proprietary license and stop there. This command never writes one; choosing and applying a commercial license is a deliberate step taken separately.
   - **Open source it** — hand off to `/harden-licenses` for the OSI path; do not write an OSI license from here.
   - **Leave it** — record the decline in the report so the next run doesn't re-ask.
-- **Any strong signal, running unattended** → **report only, never apply.** Autonomous callers (`/autonomous-doc-refresh`, the weekly doc-consolidation LaunchAgent, any `-p` headless run) must not stamp a license onto a repo without the operator in the loop. Emit the line *"Unlicensed + <signal> — run `/apply-higgins-license` when you're at a keyboard"* and move on. Detect unattended by the absence of an interactive session; if in doubt, treat it as unattended.
+- **Any strong signal, running unattended** → **report only, never apply.** Autonomous callers (`/autonomous-doc-refresh`, the weekly doc-consolidation LaunchAgent, any `-p` headless run) must not stamp a license onto a repo without the operator in the loop. Emit the line *"Unlicensed + <signal> — pick a license when you're at a keyboard"* and move on. Detect unattended by the absence of an interactive session; if in doubt, treat it as unattended.
 
-**Delegate, never inline.** Writing the license text, the manifest fields, and the README section is `apply-higgins-license`'s job — invoke it via the `Skill` tool and let it run its own detection and closeout. Do not reimplement any of it here, and do not pass `--force` from this phase.
+**Surface, never write.** This phase's entire job is to raise the signal and record the answer. Do not write license text, manifest license fields, or a README license section from here — that is a separate, deliberate act.
 
 ---
 
@@ -214,8 +214,8 @@ Print to chat. Format:
 - package.json `"license": "MIT License"` → `"MIT"` (SPDX id)
 - README badge URL slug `license-mit-orange` already correct
 - Flag: pyproject.toml classifier names Apache-2.0 but root LICENSE is MIT — needs human decision on which is authoritative
-- No license + public remote → ran `apply-higgins-license`, wrote LICENSE (see its report above)
-  (other shapes this line takes: "No license (fine for a local prototype)" · "Unlicensed + publishable package — run `/apply-higgins-license` when you're at a keyboard" · "No license — you declined, not re-asking")
+- No license + public remote → flagged; needs a license decision (nothing written)
+  (other shapes this line takes: "No license (fine for a local prototype)" · "Unlicensed + publishable package — pick a license when you're at a keyboard" · "No license — you declined, not re-asking")
 
 ### Flagged — ambiguous doc claims (not edited)
 - README.md L42: "supports Postgres, MySQL, and SQLite" — only Postgres adapter found in src/; unclear if others are planned or removed
@@ -244,5 +244,5 @@ Keep the report tight — one line per change, no prose paragraphs. The user rea
 - Never modify code files — docs only. The one exception is `.gitignore`.
 - Never delete a file from disk. `git rm --cached` (index-only) is the only removal allowed, and only for clear-cut cruft.
 - Never modify third-party vendored docs. Edits to `LICENSE` / `NOTICE` are limited to the narrow fixes Phase 6 allows (copyright year bumps, SPDX identifier or holder-name typos) — never relicense, never rewrite the license body.
-- Never write a *new* license yourself. The only path to a new LICENSE is Phase 6b delegating to `apply-higgins-license`, and only in an interactive session where the operator picked it.
+- Never write a *new* license yourself. Phase 6b surfaces the gap and records the decision; applying a license is always a separate, deliberate step.
 - If the repo is not a git repo (`git rev-parse` fails), stop and tell the user — this command assumes git.
