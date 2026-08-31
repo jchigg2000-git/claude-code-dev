@@ -56,7 +56,7 @@ telemetry the app emits, and the auth audit events are noted as pending.
    `audit`/`metrics`/`events` routes and tables, any existing monitoring page,
    any logging seam. Anything found is a **skip-or-flag**, never an overwrite.
 3. Decide the store placement (§ Store): a **separate** obs DB (the Fastify + SQLite
-   references, cleanest decoupling), the **same** DB as auth (db2, simplest), or the
+   references, cleanest decoupling), the **same** DB as auth (the zero-framework app, simplest), or the
    **app's Postgres** (the Postgres variant). Default to a separate store when the app uses
    SQLite; use the app's Postgres when it already runs Postgres.
 4. Inventory what's worth surfacing: what audit-worthy actions exist (logins,
@@ -90,8 +90,8 @@ telemetry the app emits, and the auth audit events are noted as pending.
   `recordExport`, `recordAccountChange`, `recordEvent`, and a telemetry recorder.
 - **Every emit is best-effort and no-op-safe**: wrapped in try/catch so a failing
   observability write can **never** throw into or slow the request that produced
-  the event (the reference layout's `safeRecord`/`safeRecordTelemetry`; db2's
-  never-throw writers). Fire-and-forget for telemetry.
+  the event (the reference layout's `safeRecord`/`safeRecordTelemetry`; the
+  zero-framework app's never-throw writers). Fire-and-forget for telemetry.
 - **One-way dependency, enforced by import direction**: observability imports
   nothing from auth or the data layer. Auth/data/handlers depend on the emit seam;
   the seam depends on nothing upstream. Keep it that way — it's the whole design.
@@ -102,8 +102,8 @@ telemetry the app emits, and the auth audit events are noted as pending.
   tracked read op is measured with zero call-site changes; slow threshold
   (`SLOW_MS`/`QUERY_SLOW_MS`, default 750ms), opt-out under tests / an env flag.
   If the target has a single data-access seam, wrap it. If it doesn't, fall back
-  to explicit `recordEvent`/`recordQueryTelemetry` at the call sites (db2's
-  `recordLlmCall`, the Postgres variant's `recordEvent` in the query handler) — and say so.
+  to explicit `recordEvent`/`recordQueryTelemetry` at the call sites (the
+  zero-framework app's `recordLlmCall`, the Postgres variant's `recordEvent` in the query handler) — and say so.
 - Telemetry carries a `source`/`operation` tag so the UI can group (e.g.
   "query-studio" vs "table-explainer", "query" vs "test").
 
@@ -127,7 +127,7 @@ telemetry the app emits, and the auth audit events are noted as pending.
   non-admin via the global auth guard. Attribute the reader via `req.authUser`.
 
 ### Retention (make it a choice, don't copy blindly)
-- **Default: prune on read** (both Fastify + SQLite references / db2) — bounded by **both**
+- **Default: prune on read** (both Fastify + SQLite references / the zero-framework app) — bounded by **both**
   age and row count (`OBS_RETAIN_DAYS` ~90 / `OBS_RETAIN_MAX_ROWS`; telemetry
   shorter, ~14d / larger cap), trimmed opportunistically on each panel read so no
   cron is needed.
@@ -158,7 +158,7 @@ telemetry the app emits, and the auth audit events are noted as pending.
 - **Best-of-family, not lowest-common:** always include the no-op-safe emit seam,
   the one-way import direction, denormalized attribution, safe-dialect percentiles,
   the degraded-mode read, and age+row-count retention — even though not every
-  family member has all six (the Postgres variant lacks retention; db2 shares the auth DB).
+  family member has all six (the Postgres variant lacks retention; the zero-framework app shares the auth DB).
 - **Telemetry realism:** only surface signals the app actually produces. An app
   with no data layer to wrap gets the audit-event half (logins/logout/changes)
   and a note that query telemetry needs a seam to instrument. Don't fabricate an

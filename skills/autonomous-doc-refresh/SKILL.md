@@ -114,5 +114,5 @@ doubles as the resume point (a re-run finds no `pending` rows and no-ops).
 - Design-doc regen via the skills self-scores on a ratchet ledger at
   `<root>/.claude/doc-quality/{gen-sys-doc,gen-sdd-doc}/ledger.md`. A preserve-voice refresh that
   lacks the external-hyperlink pass should log provenance-only and NOT post itself as champion.
-- If `~/.claude/skills/gen-sys-doc/SKILL.md` is empty on disk, agents follow that ratchet-ledger
+- If `~/.claude/commands/gen-sys-doc.md` is empty or missing, agents follow that ratchet-ledger
   convention directly and still produce good docs.

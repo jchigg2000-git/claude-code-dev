@@ -68,7 +68,7 @@ skipped and noted in the closeout).
 ### The settings page shell (always)
 - **One page**, admin-reachable, built from **CollapsibleCard sections** — one
   card per concern, each independently collapsible with its open/closed state
-  persisted (localStorage key per card, the Postgres app / db2 `collapseKey` idiom).
+  persisted (localStorage key per card, the Postgres app / zero-framework app `collapseKey` idiom).
 - Page layout matches the family header convention: `mx-auto max-w-* space-y-*`
   container, an icon-tile + `text-gradient` `<h1>` + muted subtitle, then the
   section cards. Reuse the app's existing shared UI kit (`Card`, `Badge`,
@@ -122,7 +122,7 @@ skipped and noted in the closeout).
   updates others. Validate on read (filter to known ids; force-include any
   non-hideable base item — the Fastify + SQLite apps always keep the base lens on).
 - Namespaced key convention: `<app>.<pref>` (e.g. `myapp.activeLenses`,
-  `db2explorer.model`, `myapp.theme`).
+  `myapp.model`, `myapp.theme`).
 
 ### The theme trap (do NOT reproduce)
 - The Postgres app writes `theme` to the server but the client **only ever applies theme

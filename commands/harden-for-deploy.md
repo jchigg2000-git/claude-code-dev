@@ -93,7 +93,7 @@ Other steps (deps, config, lint, tests, observability): never halt on their find
 1. **If the deciding fact is checkable now, check it.** For a Railway target, query the live env (presence only — see below) before finalizing severity. Verifying usually collapses the ambiguity — a flagged bypass is often inert in prod once you confirm the gating var.
 2. **If it can't be verified this run,** record it as `CONDITIONAL-CRITICAL`, list it at the TOP of the report's stop-the-line section with the exact one-line verification step, and cap the deploy decision at YELLOW (never GREEN) until it's verified.
 
-**Live environment is a first-class check for Railway targets, not best-effort.** When a Railway target is detected, the env diff (`harden-secrets` Phase 5) and config drift (`harden-config` Phase 5) are among the most decisive checks in the whole series — they resolve most conditional-criticals. Inspect variable **presence and names only; never read, echo, or write secret VALUES** into any plan/report (mask to `<set, N chars>`). If the project isn't linked, say so loudly and emit an explicit "verify these in the dashboard" gate rather than degrading silently.
+**Live environment is a first-class check for Railway targets, not best-effort.** When a Railway target is detected, the env diff (`harden-secrets` Phase 5) and config drift (`harden-config` Phase 1, item 5) are among the most decisive checks in the whole series — they resolve most conditional-criticals. Inspect variable **presence and names only; never read, echo, or write secret VALUES** into any plan/report (mask to `<set, N chars>`). If the project isn't linked, say so loudly and emit an explicit "verify these in the dashboard" gate rather than degrading silently.
 
 ---
 

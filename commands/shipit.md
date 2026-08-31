@@ -7,10 +7,17 @@ argument-hint: [branch-if-on-main] [commit-message] [--check] [--prod]
 # Ship it (fast)
 
 Pre-gathered state (already loaded — don't re-run these before acting):
-- Branch: !`git branch --show-current`
-- Status: !`git status --short`
-- Untracked: !`git ls-files --others --exclude-standard`
-- Diff (tracked): !`git rev-parse --verify -q HEAD >/dev/null && git diff HEAD || echo "(no commits yet — initial commit)"`
+- Repo root: !`git rev-parse --show-toplevel 2>/dev/null || echo "NOT-A-REPO"`
+- Branch: !`git branch --show-current 2>/dev/null`
+- Status: !`git status --short 2>/dev/null`
+- Untracked: !`git ls-files --others --exclude-standard 2>/dev/null`
+- Diff (tracked, **stat only**): !`git rev-parse --verify -q HEAD >/dev/null 2>&1 && git diff HEAD --stat || echo "(no commits yet — initial commit, or not a repo)"`
+
+**If "Repo root" above is `NOT-A-REPO`**, the pre-gather ran outside a git repo — this happens
+whenever the session or subagent cwd is a parent directory like `~/Projects` rather than the
+target repo. Do **not** stop. The pre-gathered state is simply empty, so ignore it and re-gather
+explicitly against the intended repo with `git -C <repo> ...` for every step of the pipeline
+below. Everything else in this command applies unchanged.
 
 Args: $ARGUMENTS
 
@@ -18,7 +25,11 @@ Ship the working tree to `main` with the **fewest possible commands**. **Stop im
 
 ## Speed rules
 - **Batch** the git pipeline: chain safe sequential steps with `&&` in **one or two Bash calls**, not one call per step.
-- The state above is already loaded — do not re-run `status`/`diff`/`branch` before acting.
+- The state above is already loaded — do not re-run `status`/`branch`/`diff --stat` before acting.
+- The diff is **stat-only by design**: the full working-tree diff was the single largest thing this
+  command injected, and nothing in the pipeline needs it. The guard reads Status + Untracked, mode
+  detection reads Branch, and branch naming reads the changed paths. Pull real hunks only in the one
+  narrow case named in pipeline step 2, and only for the paths that need them.
 - The hygiene + sysdoc gates are **OFF by default** — they're the slow part. Run them only if `--check` or `--full` is in the args (see *Optional gates*).
 
 ## Pre-flight (no Bash — just read the state above)
@@ -41,7 +52,11 @@ Ship the working tree to `main` with the **fewest possible commands**. **Stop im
 
 ## Pipeline (chain into ~1–2 Bash calls)
 1. Main mode only: `git checkout -b <branch>`.
-2. Stage per the guard above, then commit. Commit message: use the message arg verbatim as subject, else generate a Conventional Commits message from the diff. Subject ≤ 72 chars. Strip any `sk-…`/`ghp_…`/`gho_…`/`xox[bpa]-…`/`AKIA…`/`-----BEGIN` token from the message. Last line:
+2. Stage per the guard above, then commit. Commit message: use the message arg verbatim as subject.
+   **Only if no message arg was given**, author a Conventional Commits message from the stat — and only
+   if the stat is too vague to name the change, fold
+   `git diff HEAD --unified=0 -- <the 1–3 most substantive paths, never lockfiles or generated files>`
+   into the Bash call you are already making. Never re-request the full `git diff HEAD`. Subject ≤ 72 chars. Strip any `sk-…`/`ghp_…`/`gho_…`/`xox[bpa]-…`/`AKIA…`/`-----BEGIN` token from the message. Last line:
    `Co-Authored-By: Claude <noreply@anthropic.com>`
    If a pre-commit hook modifies files, re-stage and retry the commit **once**.
 3. `git push -u origin HEAD`
@@ -77,4 +92,23 @@ In the report, add a **promoted** bucket: deploy branch name, the SHA now on it,
 ## Report
 Branch name, commit SHA, what landed on `origin/main`, and buckets: **done / skipped** (secret-guarded files, remote-prune failures) **/ stop-clean** (exact state, where every piece of work lives). State whether the optional gates ran.
 
-End the report there. No closing question, no offer of next steps, no asking whether the prompt meant something else or whether a re-sent/duplicate request was intended. If the work was already shipped, say so in one line and stop.
+End the report there. No closing question, no offer of next steps, no asking whether the prompt meant
+something else or whether a re-sent/duplicate request was intended. If the work was already shipped, say
+so in one line.
+
+### "End the report" means stop talking — not stop working
+
+This command gets used two ways, and the difference decides what happens after the report:
+
+- **Terminal ship** — shipping *was* the task. The report is the last thing in the turn; yield.
+- **Checkpoint ship** — the ship happened *inside* work that is still in flight: an autonomous loop,
+  `/unleash`, or a multi-phase build that ships each phase as it lands. Here the report is a by-product
+  emitted in passing. Print it, then **immediately resume the work that was already underway** — same
+  turn, no handoff. Do not narrate what was just shipped beyond the report, do not preview what is next,
+  do not ask which thing to pick up.
+
+**Default to checkpoint whenever there is unfinished work in flight** — an open todo list, a stated
+multi-phase plan, or a standing instruction to keep going. A ship is a git operation, not a permission
+gate and not a stopping point. Treating a mid-build checkpoint as terminal is the actual failure mode
+here: four ships in one 46-minute build is normal use, and each one handing the session back is friction
+the command is supposed to remove.
