@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="enrich-document skill">
+<title>{{TITLE}}</title>
+<style>
+{{STYLE}}
+</style>
+</head>
+<body class="cl-doc">
+{{BODY}}
+<footer class="cl-enrich-footer">
+  Enriched with the <code>enrich-document</code> skill — internal links self-heal at view time;
+  hover a <span class="cl-claude-mark" style="color:var(--cl-accent)">✶</span> Claude button to preview its prompt, click to copy.
+</footer>
+
+<!-- Per-item Claude prompts. Buttons reference these by id (data-prompt-id) so multi-line
+     prompts never have to be attribute-escaped. -->
+<script type="application/json" id="cl-prompts">
+{{PROMPTS_JSON}}
+</script>
+
+<script>
+{{SCRIPT}}
+</script>
+</body>
+</html>

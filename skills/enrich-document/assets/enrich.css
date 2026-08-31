@@ -1,0 +1,144 @@
+/* enrich.css — styling for the enrich-document skill's HTML output.
+ * Light/dark aware, readable column, with affordances for TOC, Claude prompt
+ * buttons, hover prompt-preview tooltips, and healed / dead internal links. */
+:root {
+  --cl-fg: #1f2328;
+  --cl-bg: #ffffff;
+  --cl-muted: #656d76;
+  --cl-border: #d0d7de;
+  --cl-link: #0969da;
+  --cl-accent: #d97757;        /* Claude terracotta */
+  --cl-accent-soft: rgba(217, 119, 87, 0.10);
+  --cl-ok: #1a7f37;
+  --cl-warn: #cf222e;
+  --cl-tip-bg: #1f2328;
+  --cl-tip-fg: #f6f8fa;
+  --cl-code-bg: rgba(127, 127, 127, 0.12);
+  --cl-max: 880px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cl-fg: #e6edf3;
+    --cl-bg: #0d1117;
+    --cl-muted: #9198a1;
+    --cl-border: #30363d;
+    --cl-link: #4493f8;
+    --cl-tip-bg: #e6edf3;
+    --cl-tip-fg: #0d1117;
+  }
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body.cl-doc {
+  color: var(--cl-fg);
+  background: var(--cl-bg);
+  font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  max-width: var(--cl-max);
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 6rem;
+}
+
+.cl-doc a { color: var(--cl-link); text-decoration: none; }
+.cl-doc a:hover { text-decoration: underline; }
+
+.cl-doc h1, .cl-doc h2, .cl-doc h3,
+.cl-doc h4, .cl-doc h5, .cl-doc h6 {
+  line-height: 1.25;
+  margin: 2em 0 0.6em;
+  scroll-margin-top: 1.5rem;
+}
+.cl-doc h1 { font-size: 2rem; }
+.cl-doc h2 { font-size: 1.5rem; border-bottom: 1px solid var(--cl-border); padding-bottom: 0.3em; }
+.cl-doc h3 { font-size: 1.2rem; }
+
+.cl-doc pre {
+  background: var(--cl-code-bg);
+  padding: 1rem;
+  border-radius: 8px;
+  overflow: auto;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.cl-doc code {
+  background: var(--cl-code-bg);
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+  font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.cl-doc pre code { background: none; padding: 0; }
+.cl-doc blockquote {
+  margin: 1em 0; padding: 0.2em 1em;
+  border-left: 3px solid var(--cl-border); color: var(--cl-muted);
+}
+.cl-doc table { border-collapse: collapse; margin: 1em 0; }
+.cl-doc th, .cl-doc td { border: 1px solid var(--cl-border); padding: 0.4em 0.7em; }
+
+/* heading self-link (the ¶/# affordance) */
+.cl-doc :is(h1, h2, h3, h4, h5, h6) .cl-anchor {
+  opacity: 0; margin-left: 0.4em; font-size: 0.8em;
+  color: var(--cl-muted); text-decoration: none;
+}
+.cl-doc :is(h1, h2, h3, h4, h5, h6):hover .cl-anchor,
+.cl-doc :is(h1, h2, h3, h4, h5, h6) .cl-anchor:focus { opacity: 1; }
+
+/* table of contents */
+.cl-toc {
+  border: 1px solid var(--cl-border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0 2.5rem;
+  background: rgba(127, 127, 127, 0.04);
+}
+.cl-toc-title {
+  font-weight: 600; margin: 0 0 0.5rem;
+  font-size: 0.78rem; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--cl-muted);
+}
+.cl-toc ul { list-style: none; margin: 0; padding: 0; }
+.cl-toc li { margin: 0.15rem 0; }
+.cl-toc .lvl-3 { padding-left: 1.1rem; }
+.cl-toc .lvl-4 { padding-left: 2.2rem; font-size: 0.95em; }
+.cl-toc .lvl-5, .cl-toc .lvl-6 { padding-left: 3.3rem; font-size: 0.9em; }
+.cl-toc a.cl-active { font-weight: 600; color: var(--cl-fg); }
+
+/* Claude prompt button */
+.cl-claude-btn {
+  display: inline-flex; align-items: center; gap: 0.3em;
+  cursor: pointer; user-select: none;
+  border: 1px solid var(--cl-border); border-radius: 999px;
+  background: var(--cl-bg); color: var(--cl-accent);
+  font: 0.72em/1 inherit; font-family: inherit;
+  padding: 0.28em 0.62em; margin-left: 0.45em;
+  vertical-align: baseline;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.cl-claude-btn:hover, .cl-claude-btn:focus {
+  border-color: var(--cl-accent); background: var(--cl-accent-soft); outline: none;
+}
+.cl-claude-btn .cl-claude-mark { font-size: 1.05em; line-height: 1; }
+.cl-claude-btn.cl-copied { color: var(--cl-ok); border-color: var(--cl-ok); background: rgba(26, 127, 55, 0.10); }
+
+/* hover / focus prompt-preview tooltip */
+.cl-tip {
+  position: absolute; z-index: 9999; display: none;
+  max-width: min(560px, 92vw); max-height: 42vh; overflow: auto;
+  background: var(--cl-tip-bg); color: var(--cl-tip-fg);
+  padding: 0.7rem 0.85rem; border-radius: 8px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap; word-break: break-word;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+}
+
+/* anchor health affordances */
+.cl-doc a[data-anchor-dead] { color: var(--cl-warn); text-decoration: underline wavy; }
+.cl-doc a[data-anchor-healed] { /* resolved silently; title attr explains */ }
+
+/* degraded Markdown-in-HTML prompt block (used when the chosen output is Markdown) */
+.cl-prompt-details { margin: 0.4rem 0 0.8rem; }
+.cl-prompt-details summary { cursor: pointer; color: var(--cl-accent); font-size: 0.85em; }
+
+/* small footer the assembler stamps in */
+.cl-enrich-footer {
+  margin-top: 4rem; padding-top: 1rem; border-top: 1px solid var(--cl-border);
+  color: var(--cl-muted); font-size: 0.8rem;
+}

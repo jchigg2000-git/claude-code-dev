@@ -1,0 +1,75 @@
+# First-party paths — every file here was authored by Justin Higgins (with Claude).
+#
+# scripts/provenance-gate.py denies any path under commands/ or skills/ that
+# is not listed. That is the point: a bulk `/sync-claude-slash` cannot sweep in
+# a vendor skill tree without a human adding lines here.
+#
+# Attest new work with:  python3 scripts/provenance-gate.py --attest <path>
+# Do not add a path you have not read.
+
+commands/apply-seo.md
+commands/audit-burden.md
+commands/claude-md-audit.md
+commands/cleanup-repo.md
+commands/cleanup-roadmap.md
+commands/diagramsystemflow.md
+commands/feature-dev.md
+commands/front-door-security.md
+commands/frontendtailwind.md
+commands/gen-sdd-doc.md
+commands/gen-sys-doc.md
+commands/generate-build-report.md
+commands/generate-journey-page.md
+commands/generate-port-registry.md
+commands/generate-test-suite.md
+commands/get-network-logs.md
+commands/handoff-to-next.md
+commands/harden-auth.md
+commands/harden-config.md
+commands/harden-deps.md
+commands/harden-for-deploy.md
+commands/harden-licenses.md
+commands/harden-observability.md
+commands/harden-secrets.md
+commands/harden-tests.md
+commands/harness-audit.md
+commands/harvestccskills.md
+commands/level-up-page.md
+commands/lowhangingfruit.md
+commands/pathfinder.md
+commands/port-collision-scan.md
+commands/ratchet-up.md
+commands/rediscover.md
+commands/roadmap.md
+commands/shipit.md
+commands/stash.md
+commands/sync-claude-slash.md
+commands/unleash.md
+commands/unstash.md
+commands/update-deps.md
+commands/update-docs.md
+commands/uxrefine.md
+skills/apply-auth-pattern/SKILL.md
+skills/apply-observability/SKILL.md
+skills/apply-settings/SKILL.md
+skills/autonomous-doc-refresh/SKILL.md
+skills/autonomous-sweep-core/SKILL.md
+skills/brand-scrub-sweep/SKILL.md
+skills/changelog-refresh/SKILL.md
+skills/config-drift/SKILL.md
+skills/deadlink-check/SKILL.md
+skills/deploy-health/SKILL.md
+skills/enrich-document/SKILL.md
+skills/enrich-document/assets/enrich.css
+skills/enrich-document/assets/enrich.js
+skills/enrich-document/assets/template.html
+skills/enrich-document/references/canonical-links.json
+skills/enrich-document/references/prompt-actions.md
+skills/enrich-document/scripts/assemble_html.py
+skills/license-compliance/SKILL.md
+skills/prompt-improver/SKILL.md
+skills/security-sweep/SKILL.md
+skills/self-improve-loop/SKILL.md
+skills/shipit/SKILL.md
+skills/test-backfill/SKILL.md
+skills/wip-reconciler/SKILL.md

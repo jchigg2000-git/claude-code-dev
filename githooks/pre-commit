@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Commit gates for this repo. Each one runs in order; the first failure stops the commit.
+#
+#   1. Provenance   — refuse to commit content that doesn't look first-party.
+#   2. Roadmap sync — refuse to commit first-party source changes that leave ROADMAP.md behind.
+#
+# Tracked in the repo (not .git/hooks) so it survives clones and can't drift.
+# Activate once per clone:
+#
+#     git config core.hooksPath githooks
+#
+# Bypass in a genuine emergency with `git commit --no-verify`, then fix it. The roadmap gate
+# alone has a narrower escape hatch that does not disable the provenance gate:
+#
+#     CCDEV_SKIP_ROADMAP_SYNC=1 git commit ...
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "pre-commit: python3 not found — cannot run the commit gates." >&2
+  echo "            Install python3, or bypass once with --no-verify." >&2
+  exit 1
+fi
+
+python3 "$REPO_ROOT/scripts/provenance-gate.py" --quiet
+python3 "$REPO_ROOT/scripts/roadmap-sync-gate.py" --quiet

@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Generated docs (commands are Markdown-only; rendered artifacts are not committed)
+*.pdf
+
+# Python bytecode from skill helper scripts
+__pycache__/
+*.pyc
+
+# Per-clone Claude Code settings — local permissions, never published
+.claude/settings.local.json

@@ -1,0 +1,6 @@
+# Deliberate rule waivers.
+# Format: <path><TAB><rule><TAB><reason>
+# Rule `*` waives every rule for that path. Do not add a path you have not read.
+commands/harden-licenses.md	foreign-copyright	This command detects license strings; "All rights reserved" at line 112 is a proprietary-license *pattern it looks for*, not a claim over this file.
+README.md	vendor-llm-docs	The Provenance gate section names the rules it enforces; the literal "llms.txt" at line 129 is documentation of a detection pattern, not a citation of a vendor docs feed.
+commands/update-docs.md	foreign-copyright	Same shape as the harden-licenses waiver above. Line 183 describes what the first-party `apply-higgins-license` command applies ("Proprietary, all rights reserved, holder per that command's current default") — it is prose about a first-party license option, not a third-party copyright claim over this file.
