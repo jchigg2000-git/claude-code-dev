@@ -1,0 +1,7 @@
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "~/.build-status/bin/build-status hook stop", "timeout": 2 }] }
+    ]
+  }
+}

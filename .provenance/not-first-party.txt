@@ -1,0 +1,13 @@
+# Known third-party paths — these live in the harness (~/.claude/) but were NOT authored by
+# Justin Higgins, and must never enter this mirror.
+#
+# scripts/provenance-gate.py blocks any path under a prefix listed here, even if it is also in
+# first-party.txt, and --attest refuses it. No exceptions.txt line can waive it.
+# /sync-claude-slash drops these from its Phase 2 candidate list, so they are never offered.
+#
+# Format: <path prefix><TAB><why it is not first-party>
+# Only the owner removes a line. A sync or an agent never does.
+
+skills/swift-reviewer/	owner confirmed not theirs (2026-09-26)
+skills/synced/	claude.ai skill-sync buckets holding Anthropic's built-in skills; not a skill itself
+skills/use-railway/	Railway's vendor skill bundle (mcp.railway.com, Railway install scripts)

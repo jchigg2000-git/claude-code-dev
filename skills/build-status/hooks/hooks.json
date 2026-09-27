@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "~/.build-status/bin/build-status hook session-start", "timeout": 2 }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "~/.build-status/bin/build-status hook user-prompt", "timeout": 2 }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Edit|Write|MultiEdit", "hooks": [{ "type": "command", "command": "~/.build-status/bin/build-status hook post-edit", "timeout": 2 }] }
+    ]
+  }
+}

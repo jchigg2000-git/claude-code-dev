@@ -24,6 +24,10 @@ Two independent layers, because they fail differently:
      strings, pinned deep links into someone else's source tree, foreign
      copyright lines, bundled LICENSE files, package manifests.
 
+  3. KNOWN THIRD-PARTY (`.provenance/not-first-party.txt`) — harness paths already
+     judged not-yours, once and for all. Blocked even if allowlisted, refused by
+     --attest, and never waivable from exceptions.txt.
+
 Deliberately biased toward false positives. A blocked commit costs one line in
 `.provenance/exceptions.txt`; a leak costs a license violation in a public repo.
 
@@ -49,6 +53,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PROV_DIR = REPO_ROOT / ".provenance"
 ALLOWLIST = PROV_DIR / "first-party.txt"
 EXCEPTIONS = PROV_DIR / "exceptions.txt"
+NOT_FIRST_PARTY = PROV_DIR / "not-first-party.txt"
 
 # Only these trees are gated. Everything else in the repo (README, LICENSE,
 # scripts/, mcp-servers/) is hand-authored here and never touched by a sync.
@@ -236,6 +241,15 @@ def waived(exceptions: set[tuple[str, str]], path: str, rule: str) -> bool:
     return (path, rule) in exceptions or (path, "*") in exceptions
 
 
+def load_denylist() -> list[str]:
+    """Parse `path-prefix<TAB>reason` from not-first-party.txt; return the prefixes."""
+    return [re.split(r"\t+|\s{2,}", line)[0].strip() for line in read_list(NOT_FIRST_PARTY)]
+
+
+def is_denied(path: str, denylist: list[str]) -> bool:
+    return any(path == d.rstrip("/") or path.startswith(d.rstrip("/") + "/") for d in denylist)
+
+
 # --------------------------------------------------------------------------- #
 # Scanning
 # --------------------------------------------------------------------------- #
@@ -315,11 +329,18 @@ def scan_structure(paths: list[str], exceptions: set[tuple[str, str]]) -> list[F
     return findings
 
 
-def scan(paths: list[str], allowlist: set[str], exceptions: set[tuple[str, str]]) -> list[Finding]:
+def scan(paths: list[str], allowlist: set[str], exceptions: set[tuple[str, str]],
+         denylist: list[str]) -> list[Finding]:
     findings: list[Finding] = []
 
     for path in sorted(set(paths)):
-        if is_gated(path) and path not in allowlist:
+        if is_denied(path, denylist):
+            findings.append(Finding(
+                "block", "known-third-party", path, 1, path,
+                "listed in .provenance/not-first-party.txt as not yours — delete it from "
+                "this repo; only the owner removes a line there",
+            ))
+        elif is_gated(path) and path not in allowlist:
             findings.append(Finding(
                 "block", "unlisted-path", path, 1, path,
                 "not attested as first-party — new paths are denied by default",
@@ -342,6 +363,13 @@ def attest(paths: list[str]) -> int:
     files = [p for p in expand(paths) if is_gated(p)]
     if not files:
         print("nothing to attest — --attest only covers commands/ and skills/", file=sys.stderr)
+        return 2
+    denied = [p for p in files if is_denied(p, load_denylist())]
+    if denied:
+        print(f"refusing to attest — listed in {NOT_FIRST_PARTY.relative_to(REPO_ROOT)} as not yours:",
+              file=sys.stderr)
+        for p in denied:
+            print(f"  {p}", file=sys.stderr)
         return 2
     current = load_allowlist()
     new = sorted(p for p in files if p not in current)
@@ -457,7 +485,7 @@ def main() -> int:
         )
         return 2
 
-    findings = scan(paths, allowlist, load_exceptions())
+    findings = scan(paths, allowlist, load_exceptions(), load_denylist())
     return report(findings, len(paths), args.quiet)
 
 

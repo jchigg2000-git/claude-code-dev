@@ -45,6 +45,8 @@ After Phase 1, compute:
 - **New commands:** files in `~/.claude/commands/` whose names are NOT in `$MIRROR/commands/`.
 - **New skills:** subdirectories of `~/.claude/skills/` whose names are NOT in `$MIRROR/skills/`.
 
+Then drop every candidate whose mirror path (`commands/<name>.md` or `skills/<name>/`) is listed in `$MIRROR/.provenance/not-first-party.txt` — those were already judged not the user's, once and for all. Never offer them. Report one line, `excluded N known third-party paths (.provenance/not-first-party.txt)`, when N > 0.
+
 If both lists are empty, report `no new harness files to consider` and proceed to closeout.
 
 Otherwise, present **one** numbered list (commands first, then skills, alphabetical within each group):
@@ -128,5 +130,5 @@ Final line:
 - **No commits by default** — leave the mirror dirty for the user. Only `--ship` (Phase 3) commits, and only the synced `commands/`/`skills/` paths, via the shipit pipeline run against `$MIRROR` (never the CWD).
 - **Stop on the unexpected** — missing directories, permission errors, or anything ambiguous. Don't guess.
 - **Do not touch `agents/` or other top-level dirs** unless explicitly extended in a future revision.
-- **Never attest.** Phase 2.5 can revert what this run wrote, but only the user may add a path to `.provenance/first-party.txt` or a line to `.provenance/exceptions.txt`. A sync command that can approve its own output is not a gate.
+- **Never attest.** Phase 2.5 can revert what this run wrote, but only the user may add a path to `.provenance/first-party.txt` or a line to `.provenance/exceptions.txt`. A sync command that can approve its own output is not a gate. Likewise, never remove a line from `.provenance/not-first-party.txt` — only the user un-lists a path.
 - **The mirror's pre-commit hook is the backstop, not the primary defense.** Phase 2.5 exists so a vendor tree never lands in the working tree at all; the hook exists because this command's own text gets overwritten by the next sync.

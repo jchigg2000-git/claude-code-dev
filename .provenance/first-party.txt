@@ -8,6 +8,7 @@
 # Do not add a path you have not read.
 
 commands/apply-seo.md
+commands/ask-me.md
 commands/audit-burden.md
 commands/claude-md-audit.md
 commands/cleanup-repo.md
@@ -29,6 +30,7 @@ commands/harden-config.md
 commands/harden-deps.md
 commands/harden-for-deploy.md
 commands/harden-licenses.md
+commands/harden-lint.md
 commands/harden-observability.md
 commands/harden-secrets.md
 commands/harden-tests.md
@@ -37,6 +39,7 @@ commands/harvestccskills.md
 commands/level-up-page.md
 commands/lowhangingfruit.md
 commands/pathfinder.md
+commands/plain-cut.md
 commands/port-collision-scan.md
 commands/ratchet-up.md
 commands/rediscover.md
@@ -55,6 +58,29 @@ skills/apply-settings/SKILL.md
 skills/autonomous-doc-refresh/SKILL.md
 skills/autonomous-sweep-core/SKILL.md
 skills/brand-scrub-sweep/SKILL.md
+skills/build-status/README.md
+skills/build-status/SKILL.md
+skills/build-status/hooks/hooks.json
+skills/build-status/hooks/hooks.stop.json
+skills/build-status/install.mjs
+skills/build-status/scripts/cli.mjs
+skills/build-status/scripts/lib/answers.mjs
+skills/build-status/scripts/lib/daemon.mjs
+skills/build-status/scripts/lib/git.mjs
+skills/build-status/scripts/lib/hooks.mjs
+skills/build-status/scripts/lib/normalize.mjs
+skills/build-status/scripts/lib/page.mjs
+skills/build-status/scripts/lib/paths.mjs
+skills/build-status/scripts/lib/render.mjs
+skills/build-status/scripts/lib/serve.mjs
+skills/build-status/scripts/lib/state.mjs
+skills/build-status/scripts/lib/write.mjs
+skills/build-status/test/answers.test.mjs
+skills/build-status/test/core.test.mjs
+skills/build-status/test/daemon.test.mjs
+skills/build-status/test/helpers.mjs
+skills/build-status/test/install.test.mjs
+skills/build-status/test/render.test.mjs
 skills/changelog-refresh/SKILL.md
 skills/config-drift/SKILL.md
 skills/deadlink-check/SKILL.md
@@ -67,9 +93,21 @@ skills/enrich-document/references/canonical-links.json
 skills/enrich-document/references/prompt-actions.md
 skills/enrich-document/scripts/assemble_html.py
 skills/license-compliance/SKILL.md
+skills/machine-health/SKILL.md
+skills/machine-health/scripts/docker-recap.sh
+skills/machine-health/scripts/watchdog.py
+skills/pack-toolbag/SKILL.md
+skills/prep-integration/SKILL.md
 skills/prompt-improver/SKILL.md
 skills/security-sweep/SKILL.md
 skills/self-improve-loop/SKILL.md
 skills/shipit/SKILL.md
 skills/test-backfill/SKILL.md
+skills/ux-tournament/SKILL.md
+skills/ux-tournament/rubric-v2-evidence.md
+skills/ux-tournament/rubric.md
+skills/ux-tournament/scripts/cost.py
+skills/ux-tournament/scripts/render.sh
+skills/ux-tournament/scripts/test-gate.mjs
+skills/ux-tournament/workflow.mjs
 skills/wip-reconciler/SKILL.md
