@@ -134,6 +134,32 @@ function sortFindingsNewestFirst(findings) {
     .map((x) => x.f);
 }
 
+// How long ago the state last changed, in words. Written in ES5 because the page's script
+// embeds this same function to tick the time between reloads.
+const STALE_MS = 3 * 3600e3;
+function relTime(ms) {
+  var m = Math.floor(ms / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return m + " min ago";
+  var h = Math.floor(m / 60);
+  if (h < 48) return h + " h ago";
+  return Math.floor(h / 24) + " days ago";
+}
+
+// The browser tab: the repo's initials on a colour of its own, so one build's tab is easy to pick
+// out from another's, and a dot in the top severity's colour while a question waits.
+const TAB_COLOURS = ["#08284D", "#0A6FB3", "#5B3FA0", "#0F6E74", "#3D4F63", "#8A2D6B"];
+const DOT_COLOURS = { red: "#E5372B", amber: "#FFC335", green: "#2F9E55" };
+function faviconHref(title, severity) {
+  const parts = String(title).split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const initials = (parts.length > 1 ? parts[0][0] + parts[1][0] : (parts[0] || "?").slice(0, 2)).toUpperCase();
+  let h = 0;
+  for (const c of String(title)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  const dot = severity ? `<circle cx="49" cy="15" r="14" fill="${DOT_COLOURS[severity] || DOT_COLOURS.amber}" stroke="#fff" stroke-width="4"/>` : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="${TAB_COLOURS[h % TAB_COLOURS.length]}"/><text x="32" y="50" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="28" font-weight="700" fill="#fff">${initials}</text>${dot}</svg>`;
+  return "data:image/svg+xml," + encodeURIComponent(svg);
+}
+
 // live: whether a server is actually reachable for this repo right now (so Save/Ratify work).
 // reason: one-line explanation when live is false, shown as a hint instead of failing silently.
 
@@ -260,6 +286,16 @@ export function render(state, ctx = {}) {
     )
     .join("");
 
+  // --- Freshness: when the state last changed is the first thing the owner looks for, so it
+  // leads the page, above the title. Older than 3 hours reads as stale.
+  const updatedMs = state.updated ? Date.parse(state.updated) : NaN;
+  let freshnessHtml = "";
+  if (Number.isFinite(updatedMs)) {
+    const age = now.getTime() - updatedMs;
+    const stale = age > STALE_MS;
+    freshnessHtml = `<div class="freshness-top"><time class="updated${stale ? " stale" : ""}" datetime="${esc(state.updated)}" data-updated-at="${updatedMs}" title="State last changed ${esc(state.updated)}. Older than 3 hours reads as stale.">Updated <span class="upd-rel">${relTime(age)}</span> &middot; <span class="upd-abs">${esc(new Date(updatedMs).toLocaleString())}</span><span class="upd-flag"${stale ? "" : " hidden"}>Stale</span></time></div>\n`;
+  }
+
   const metaBits = [];
   if (isGitRepo) {
     metaBits.push(`branch <code>${esc(branch)}</code>`);
@@ -267,7 +303,7 @@ export function render(state, ctx = {}) {
   } else {
     metaBits.push("not a git repository");
   }
-  if (state.updated) metaBits.push(`state updated ${esc(state.updated)}`);
+  if (state.updated && !freshnessHtml) metaBits.push(`state updated ${esc(state.updated)}`);
   metaBits.push(`generated ${now.toLocaleTimeString()}`);
   metaBits.push("refreshes every 20s");
   metaBits.push(live ? `serving on <code>127.0.0.1:${port}</code>` : `read-only${reason ? ` (${esc(reason)})` : ""}`);
@@ -395,7 +431,8 @@ export function render(state, ctx = {}) {
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} — build status</title>
+<title>${unanswered.length ? `(${unanswered.length}) ` : ""}${esc(title)} — build status</title>
+<link rel="icon" type="image/svg+xml" href="${faviconHref(title, unanswered.length ? topSeverity || "amber" : null)}">
 <style>
   :root{--navy:#08284D;--blue:#0B90DA;--sky:#7AC8F3;--green:#65BC7B;--sun:#FFC335;--ember:#E96900;
         --ink:#12212f;--mut:#5b6b7c;--line:#dde5ec;--bg:#f6f9fc;--card:#fff;
@@ -411,6 +448,11 @@ export function render(state, ctx = {}) {
   header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:4px}
   h1{font-size:23px;margin:0;letter-spacing:-.2px;color:var(--navy)}
   .phase{color:var(--mut);font-size:14px}
+  .freshness-top{margin:0 0 10px;font-size:14px}
+  .updated{font-weight:600;color:var(--ink)}
+  .updated .upd-abs{font-weight:400;color:var(--mut)}
+  .updated.stale{display:inline-block;background:#fff4e5;color:var(--ember-text);border:1px solid #f5c89a;border-radius:999px;padding:2px 10px}
+  .upd-flag{margin-left:8px;font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;background:var(--ember-text);color:#fff;border-radius:999px;padding:1px 7px}
   .meta{color:var(--mut);font-size:12.5px;margin:6px 0 18px}
   .meta code{background:#eaf1f7;padding:1px 6px;border-radius:4px;color:var(--navy)}
   .tabs{display:flex;gap:2px;margin-bottom:18px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:thin}
@@ -591,7 +633,7 @@ export function render(state, ctx = {}) {
   .draft-banner{border-left:4px solid var(--sun);background:#fffaf0;font-size:13.5px}
   .qquote{margin:4px 0;padding:4px 10px;border-left:3px solid var(--line);color:#243546;font-size:13px}
 </style></head><body><div class="wrap">
-<header><h1>${esc(title)}</h1>${state.phase ? `<span class="phase">${esc(state.phase)}</span>` : ""}</header>
+${freshnessHtml}<header><h1>${esc(title)}</h1>${state.phase ? `<span class="phase">${esc(state.phase)}</span>` : ""}</header>
 <div class="meta">${metaBits.join(" &middot; ")}</div>
 <div class="tabs" role="tablist" aria-label="Build status">
   ${TABS.map((t, i) => `<button type="button" class="tab-btn${i === 0 ? " active" : ""}" role="tab" id="tabbtn-${t.id}" aria-controls="tab-${t.id}" aria-selected="${i === 0 ? "true" : "false"}" tabindex="${i === 0 ? "0" : "-1"}" data-tab="${t.id}">${t.label}${t.badge || ""}</button>`).join("\n  ")}
@@ -965,6 +1007,23 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
   var qClear = document.getElementById("q-clear");
   if (qClear) qClear.addEventListener("click", function(){ qview.sev = []; writeJson("localStorage", QKEY, qview); applyQuestions(); });
   applyQuestions();
+
+  // --- Freshness: tick the relative time and the stale flag between reloads (a suspended
+  // refresh can hold the page for minutes).
+  var STALE_MS = ${STALE_MS};
+  ${relTime.toString()}
+  var upd = document.querySelector("time.updated");
+  function tickUpdated(){
+    if (!upd) return;
+    var age = Date.now() - Number(upd.getAttribute("data-updated-at"));
+    var rel = upd.querySelector(".upd-rel");
+    if (rel) rel.textContent = relTime(age);
+    upd.classList.toggle("stale", age > STALE_MS);
+    var flag = upd.querySelector(".upd-flag");
+    if (flag) flag.hidden = !(age > STALE_MS);
+  }
+  tickUpdated();
+  setInterval(tickUpdated, 30000);
 
   // --- Scroll: kept across a reload (the 20s refresh, or the reload after saving an answer) on
   // the same tab. A fresh visit starts at the top.

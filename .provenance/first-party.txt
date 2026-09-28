@@ -92,6 +92,9 @@ skills/enrich-document/assets/template.html
 skills/enrich-document/references/canonical-links.json
 skills/enrich-document/references/prompt-actions.md
 skills/enrich-document/scripts/assemble_html.py
+skills/lead-keeper/SKILL.md
+skills/lead-keeper/scripts/snapshot.mjs
+skills/lead-keeper/test/snapshot.test.mjs
 skills/license-compliance/SKILL.md
 skills/machine-health/SKILL.md
 skills/machine-health/scripts/docker-recap.sh

@@ -2,7 +2,7 @@
 name: build-status
 description: Generate and open a local, auto-refreshing HTML "build status" dashboard for whatever repo this is invoked in — narrative step list, git commit trail, detected quality-gate pills, a findings log and questions for the owner — from a per-repo state file (.claude/build-status.json). A deterministic CLI (~/.build-status/bin/build-status) does every write, render and page-server job; this skill does the judgment — attaching to an existing dashboard, Bootstrap, gates, phase changes, and what to record. Asks you to confirm a derived step list instead of inventing one, never asks or opens anything when nobody is attending, works in any repo (Node, Rust, Go or none), and never commits. Fire on `/build-status` or "show me the build status / open the build dashboard."
 argument-hint: "[--done <step>] [--next-phase <label>] [--finding <text>] [--note <text>] [--phase <text>] [--gates] [--init] [--open]"
-allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
+allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion, Agent, SendMessage
 ---
 
 # /build-status
@@ -158,7 +158,54 @@ UserPromptSubmit) and restore the state file if an edit breaks it (PostToolUse).
 settings only when the owner asks. The Stop-hook variant (`hooks/hooks.stop.json`) is opt-in per
 repo, for looping builds.
 
-## 8. Report — short
+## 8. @keeper — a standing build-status agent
+
+When this is invoked in a session that is running other agents or a long autonomous build (or the
+owner asks for "@keeper"), keep one **sonnet** agent on the page for the rest of the session, named
+**@keeper** (the owner addresses it that way; relay any "@keeper …" message to it with SendMessage).
+Reuse the running one; spawn one only if none exists. It counts toward the session's agent cap.
+
+Brief it with this section, plus the repo's `locate --json` result. @keeper:
+- **Records** through the CLI verbs only (§5): every merge, measured result, owner answer acted on
+  and decision, when it happens. The main session messages it at each such event; on every pass it
+  also compares `git log` since its last pass with the findings and records what is missing.
+- **Keeps the file and the page in sync:** after every change to the state file (its own, the main
+  session's, or the owner's answers from the page), it renders — `bs render`, or for a
+  `repo-generator` the repo's own generator — so the HTML never lags the JSON.
+- **Relays owner answers:** new answers in `questions` go to the main session (SendMessage to
+  "main") with the id and the answer verbatim; the main session acts on them per the repo's rules.
+- **Owns how new things are shown.** When the build produces a new kind of result the page has no
+  home for (a regression-gate series, per-class scores, a backlog, a model comparison), @keeper adds
+  a small view for it — in a `repo-generator` repo's own generator, with a test, committed by path —
+  and asks before restructuring the page, removing content, or changing how answers and
+  ratification work. It asks the lead bookkeeper, or the main session when no lead is running.
+  In a `generic` repo it proposes the view instead (the CLI is shared across repos, so it is not
+  edited from one session).
+- **Reports to the lead bookkeeper only** (`/lead-keeper`), a session outside every build that
+  coordinates the keepers. The session's name is in `~/.build-status/lead/lead.txt`. While
+  ListAgents shows that session, @keeper sends it by SendMessage everything it would otherwise
+  report or ask: proposals, questions about the page, and work it took on. It uses the main
+  session for its duties (relaying owner answers), and falls back to it only when no lead is
+  running. The lead's messages reach @keeper through the main session, which relays any message
+  starting with `@keeper`. If no @keeper is running, the main session answers it itself.
+- **Follows standing orders.** When @keeper starts, it reads `~/.build-status/lead/orders.md`, if
+  that exists, and follows the orders marked `(all)` or with its repo's name. It also follows any
+  the lead sends it later. Orders let it act without asking anyone, but they stop at the Never
+  list below, and the owner and the repo's own rules overrule them.
+- **Stays on the books.** It doesn't leave bookkeeping to do the main session's work, with two
+  exceptions. One is a build clearly running on its own (`locate --json` says `attended: false`,
+  or the build is under /loop or /unleash). The other is work that fits between passes and costs
+  less done by @keeper, whose context is already warm, than by a new agent. Either way, the work
+  must be the kind the tier map gives sonnet. While it helps, it brings the books current at
+  least once a minute (records what happened, renders), so the page is never more than a minute
+  behind. It tells the lead in one line what it took on.
+- **Never** commits the state file (the main session does), re-serializes it outside the verbs
+  except as §5 allows (Node `JSON.stringify(s, null, 2) + "\n"` or Python with
+  `ensure_ascii=False`), or starts/stops a page server other than the documented way.
+- Between messages it runs a pass about every 10 minutes if its tools allow a timer; otherwise it
+  passes whenever the main session messages it.
+
+## 9. Report — short
 
 ```
 <repo> — <done>/<N> steps, gate: <ok|warn|none>, <M> findings, <Q> open questions

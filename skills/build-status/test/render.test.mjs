@@ -37,3 +37,26 @@ test("a read-only page with questions still auto-refreshes (pending saves are co
   const body = /function anySavePending\(\)\{([^}]*)\}/.exec(html)[1];
   assert.doesNotMatch(body, /disabled/);
 });
+
+test("the last-update time leads the page and turns stale after 3 hours", () => {
+  const at = "2026-09-27T12:00:00-05:00";
+  const at5min = render(normalize({ steps: [], updated: at }), { title: "t", now: new Date(Date.parse(at) + 5 * 60e3) }).html;
+  assert.ok(at5min.indexOf('class="freshness-top"') < at5min.indexOf("<header>"));
+  assert.match(at5min, /Updated <span class="upd-rel">5 min ago<\/span>/);
+  assert.match(at5min, /<span class="upd-flag" hidden>Stale/);
+  assert.doesNotMatch(at5min, /state updated/);
+  const at4h = render(normalize({ steps: [], updated: at }), { title: "t", now: new Date(Date.parse(at) + 4 * 3600e3) }).html;
+  assert.match(at4h, /class="updated stale"/);
+  assert.match(at4h, /<span class="upd-flag">Stale/);
+});
+
+test("the tab is easy to find: repo-first title, a favicon, and a severity dot while a question waits", () => {
+  const icon = (html) => decodeURIComponent(/<link rel="icon" type="image\/svg\+xml" href="data:image\/svg\+xml,([^"]+)">/.exec(html)[1]);
+  const quiet = render(normalize({ steps: [] }), { title: "twin-compiler" }).html;
+  assert.match(quiet, /<title>twin-compiler — build status<\/title>/);
+  assert.match(icon(quiet), />TC<\/text>/);
+  assert.doesNotMatch(icon(quiet), /<circle/);
+  const waiting = render(normalize({ steps: [], questions: [{ id: "q", question: "?", severity: "red", answer: null }] }), { title: "twin-compiler" }).html;
+  assert.match(waiting, /<title>\(1\) twin-compiler — build status<\/title>/);
+  assert.match(icon(waiting), /<circle[^>]*fill="#E5372B"/);
+});
