@@ -2,7 +2,8 @@
 """ux-tournament cost meter — price a Claude Code session (top level + subagents) from local transcripts.
 
 Method: scan the session's top-level .jsonl and every file under <session-id>/ recursively, dedupe
-assistant messages by message.id (resumed sessions replay turns), sum usage per model, price cache
+assistant messages by message.id (resumed sessions replay turns; streamed messages repeat their usage
+line and only the last one has the full output count, so the largest is kept), sum usage per model, price cache
 reads and cache writes separately. Cache writes use the ephemeral_1h/5m split when the usage block
 has it; otherwise 1h is assumed (Claude Code's default TTL).
 
@@ -19,6 +20,7 @@ RATES = {
     "claude-fable-5-1": (10.0, 50.0, 0.25, 12.5, 20.0),
     "claude-mythos-5-1": (10.0, 50.0, 0.25, 12.5, 20.0),
     "claude-fable-5":   (10.0, 50.0, 1.00, 12.5, 20.0),
+    "claude-opus-5-5":  (4.0, 20.0, 0.20, 5.0, 8.0),   # 2026-09-26 claude-api table; cache writes at the usual 1.25x / 2x of input
     "claude-opus-5":    (5.0, 25.0, 0.50, 6.25, 10.0),
     "claude-opus-4-8":  (5.0, 25.0, 0.50, 6.25, 10.0),
     "claude-opus-4-7":  (5.0, 25.0, 0.50, 6.25, 10.0),
@@ -80,9 +82,10 @@ def main():
     files = ([] if a.subagents_only else [top]) + subs
     files = [f for f in files if os.path.exists(f)]
 
-    seen = set()
-    per = {}
-    n_msgs = 0
+    # One entry per message id. A streamed message writes several usage lines under the same id and the
+    # first carries only a partial output_tokens count (e.g. 5, then 552), so keep the line with the
+    # largest output count. The window test uses the message's first timestamp.
+    msgs = {}
     for f in files:
         with open(f, "r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -96,27 +99,31 @@ def main():
                 u = msg.get("usage")
                 if not u:
                     continue
-                ts = m.get("timestamp") or ""
-                if a.since and ts < a.since:
-                    continue
-                if a.until and ts > a.until:
-                    continue
                 mid = msg.get("id") or m.get("uuid")
-                if mid in seen:
-                    continue
-                seen.add(mid)
-                n_msgs += 1
-                model = msg.get("model") or "unknown"
-                d = per.setdefault(model, {"input": 0, "output": 0, "cache_read": 0, "cw_5m": 0, "cw_1h": 0})
-                d["input"] += u.get("input_tokens", 0) or 0
-                d["output"] += u.get("output_tokens", 0) or 0
-                d["cache_read"] += u.get("cache_read_input_tokens", 0) or 0
-                cc = u.get("cache_creation") or {}
-                if cc:
-                    d["cw_5m"] += cc.get("ephemeral_5m_input_tokens", 0) or 0
-                    d["cw_1h"] += cc.get("ephemeral_1h_input_tokens", 0) or 0
-                else:
-                    d["cw_1h"] += u.get("cache_creation_input_tokens", 0) or 0
+                prev = msgs.get(mid)
+                if prev is None:
+                    msgs[mid] = [msg.get("model") or "unknown", u, m.get("timestamp") or ""]
+                elif (u.get("output_tokens") or 0) >= (prev[1].get("output_tokens") or 0):
+                    prev[1] = u
+
+    per = {}
+    n_msgs = 0
+    for model, u, ts in msgs.values():
+        if a.since and ts < a.since:
+            continue
+        if a.until and ts > a.until:
+            continue
+        n_msgs += 1
+        d = per.setdefault(model, {"input": 0, "output": 0, "cache_read": 0, "cw_5m": 0, "cw_1h": 0})
+        d["input"] += u.get("input_tokens", 0) or 0
+        d["output"] += u.get("output_tokens", 0) or 0
+        d["cache_read"] += u.get("cache_read_input_tokens", 0) or 0
+        cc = u.get("cache_creation") or {}
+        if cc:
+            d["cw_5m"] += cc.get("ephemeral_5m_input_tokens", 0) or 0
+            d["cw_1h"] += cc.get("ephemeral_1h_input_tokens", 0) or 0
+        else:
+            d["cw_1h"] += u.get("cache_creation_input_tokens", 0) or 0
 
     rows, total, unpriced, by_tier = [], 0.0, [], {}
     for model, d in sorted(per.items()):
