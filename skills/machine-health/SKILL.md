@@ -28,7 +28,10 @@ docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}'
 ollama ps
 ```
 
-`ps` RSS hides the big ones. VM guests (Docker, Claude Desktop) and GPU-wired model
+`pgrep -f PATTERN` also matches your own shell (and every `$(...)` subshell in a loop), because
+the pattern is in its command line, so counts and parent chains come out wrong. Filter with
+`ps -Ao pid=,command= | awk '/[G]oogle Chrome --headless/'` instead: the bracketed character keeps
+the regex from matching its own text. `ps` RSS hides the big ones. VM guests (Docker, Claude Desktop) and GPU-wired model
 weights (llama-server) only show up in `top`'s MEM column or as "wired". A single
 `docker stats` sample can spike to 300%+, so resample before calling a container hot.
 Single-threaded hogs top out near 100%, so don't wait for 150%.
@@ -95,7 +98,11 @@ python3 ~/.claude/skills/machine-health/scripts/watchdog.py [--ignore substr,...
 | Docker cap >12 GB and its ports idle for 10m | **exit 3 → wakes you** (restart window) |
 
 On an ALERT wake-up, attribute the process (step 2), act or coordinate, then restart
-the watchdog with `--ignore` for anything you've accepted. Actions go to
+the watchdog with `--ignore` for anything you've accepted. `--ignore` substrings also match
+ollama model names and the cwd of the owning Claude session, so `--ignore <repo>` keeps the
+watchdog off everything that session spawned (vitest workers carry no repo in their command).
+When the user puts a session off-limits, touch nothing of it by hand either: no renice (you can't
+undo one without sudo), no model unload, no suggestions to it. Actions go to
 `~/.claude/health-watchdog/watchdog.log`, with a status line every 10 polls.
 
 ## Coordinating with peer sessions

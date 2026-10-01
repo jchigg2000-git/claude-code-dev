@@ -60,3 +60,31 @@ test("the tab is easy to find: repo-first title, a favicon, and a severity dot w
   assert.match(waiting, /<title>\(1\) twin-compiler — build status<\/title>/);
   assert.match(icon(waiting), /<circle[^>]*fill="#E5372B"/);
 });
+
+test("an open question with a recommendation offers Accept recommendation; one without doesn't; accepting is labelled", () => {
+  const html = page({
+    questions: [
+      { id: "a", question: "Q1?", severity: "amber", answer: null, recommendation: 'yes, "as an option"' },
+      { id: "b", question: "Q2?", severity: "green", answer: null },
+      { id: "c", question: "Q3?", severity: "green", answer: "no", answeredAt: "2026-09-26T10:00:00Z", answeredVia: "page", recommendation: "no" },
+    ],
+  });
+  assert.match(html, /<button class="qaccept-btn" data-id="a" data-rec="yes, &quot;as an option&quot;" >Accept recommendation<\/button>/);
+  assert.equal(html.match(/<button class="qaccept-btn"/g).length, 1, "only the open question with a recommendation gets the button");
+  assert.match(html, /answered on the page \(accepted the recommendation\)/);
+});
+
+test("flagged findings get a ★ Flagged filter pill: a tag or a ★ summary counts; none, no pill", () => {
+  const html = page({
+    steps: [],
+    findings: [
+      { id: "a", summary: "measured recall", tags: ["interesting"] },
+      { id: "b", summary: "★ a surprise" },
+      { id: "c", summary: "routine merge" },
+    ],
+  });
+  assert.match(html, /data-group="flag" data-value="1"[^>]*>&#9733; Flagged <span class="fcount">2<\/span>/);
+  // The Findings tab's list (data-order) marks exactly the two flagged items; the overview repeats them.
+  assert.equal((html.match(/data-flag="1" data-order=/g) || []).length, 2);
+  assert.doesNotMatch(page({ steps: [], findings: [{ id: "c", summary: "routine" }] }), /class="fpill" data-group="flag"/);
+});

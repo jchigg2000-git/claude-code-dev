@@ -8,7 +8,9 @@ Auto:  renice build/test/search procs to +10; kill ones stuck past their age cap
 Exit:  sustained CPU hog (process >80% for 15m, container >150% for 10m), sustained critical pressure, or an
        idle window to restart Docker with a lower memory cap. Exit code 3 + ALERT line.
 
-Flags: --once  --dry-run  --ignore a,b (substring match on command / container name)
+Flags: --once  --dry-run  --ignore a,b (substring match on command / container name / ollama
+       model, and on the cwd of an owning claude session: `--ignore ask-meadowlark` protects
+       every process that session spawned, including its `node (vitest N)` workers)
        --no-docker-window
 """
 import json
@@ -41,6 +43,7 @@ WATCH = re.compile(r"--watch|\s-w(\s|$)")
 SCRIPT = re.compile(r"\b(Python|python3?(\.\d+)?)\s+(-\S+\s+)*\S+\.py(\s|$)")
 NUISANCE = re.compile(r"Microsoft Update Assistant|Microsoft AutoUpdate")
 HOG_ALLOW = re.compile(r"WindowServer|kernel_task|com\.apple\.Virtualization|llama-server|mds_stores|mdworker")
+CLAUDE = re.compile(r"^(\S*/)?claude(\.exe)?(\s|$)")
 
 DRY = "--dry-run" in sys.argv
 ONCE = "--once" in sys.argv
@@ -89,6 +92,30 @@ def procs():
 
 def ignored(text):
     return any(s in text for s in IGNORE)
+
+
+def guarded(ps):
+    """Pids descended from a claude session whose cwd matches --ignore."""
+    if not IGNORE:
+        return set()
+    sessions = [str(p["pid"]) for p in ps if CLAUDE.match(p["cmd"])]
+    owners, pid = set(), None
+    if sessions:
+        for line in sh("lsof", "-a", "-d", "cwd", "-Fpn", "-p", ",".join(sessions)).splitlines():
+            if line[:1] == "p":
+                pid = int(line[1:])
+            elif line[:1] == "n" and pid and ignored(line[1:]):
+                owners.add(pid)
+    parent = {p["pid"]: p["ppid"] for p in ps}
+    out = set()
+    for p in ps:
+        a, hops = p["pid"], 0
+        while a > 1 and hops < 64:
+            if a in owners:
+                out.add(p["pid"])
+                break
+            a, hops = parent.get(a, 1), hops + 1
+    return out
 
 
 def kill_tree(p, why):
@@ -165,10 +192,11 @@ def main():
         polls += 1
         ps = procs()
         live = {p["pid"] for p in ps}
+        hands_off = guarded(ps)
         builds = 0
         for p in ps:
             cmd = p["cmd"]
-            if ignored(cmd):
+            if ignored(cmd) or p["pid"] in hands_off:
                 continue
             kind = "build" if BUILD.search(cmd) and not WATCH.search(cmd) else \
                    "search" if SEARCH.search(cmd) else None
@@ -225,7 +253,7 @@ def main():
         crit = level < CRIT_FREE_PCT and swap_free < CRIT_SWAP_FREE_MB
         crit_polls = crit_polls + 1 if crit else 0
         if crit_polls >= CRIT_UNLOAD_POLLS and time.time() - last_unload > OLLAMA_COOLDOWN_S:
-            models = ollama_loaded()
+            models = [m for m in ollama_loaded() if not ignored(m)]
             if models and not any(port == 11434 and name != "ollama" for port, name in conns):
                 for mdl in models:
                     log(f"UNLOAD ollama {mdl} (free={level}% swap_free={swap_free:.0f}M, no clients)")

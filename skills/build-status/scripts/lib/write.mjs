@@ -355,6 +355,7 @@ export function addQuestion(raw, q, { explicitId = false } = {}) {
     question: q.question,
     severity: q.severity || "amber",
     ...(q.context ? { context: q.context } : {}),
+    ...(q.recommendation ? { recommendation: q.recommendation } : {}),
     answer: null,
     answeredAt: null,
     ratified: false,
@@ -390,6 +391,17 @@ export function setAnswer(raw, id, { answer, via, quote }) {
   if (via) q.answeredVia = via;
   if (quote !== undefined) q.answerQuote = quote;
   else delete q.answerQuote;
+  return { changed: true, id: q.id };
+}
+
+// The answer the asker recommends; the page offers it as a one-click "Accept recommendation".
+// An empty text removes it (and the button with it).
+export function setRecommendation(raw, id, text) {
+  const q = findQuestion(raw, id);
+  const next = String(text ?? "").trim();
+  if ((q.recommendation ?? "") === next) return { changed: false, id: q.id };
+  if (next) q.recommendation = next;
+  else delete q.recommendation;
   return { changed: true, id: q.id };
 }
 
@@ -440,6 +452,16 @@ export function setStepState(raw, match, state) {
   const step = matchStep(raw, match);
   if (step.state === state) return { changed: false, id: step.id };
   step.state = state;
+  return { changed: true, id: step.id };
+}
+
+export function renameStep(raw, match, name) {
+  const next = String(name ?? "").trim();
+  if (!next) throw new Conflict("a step name can't be empty");
+  const step = matchStep(raw, match);
+  if (step.name === next) return { changed: false, id: step.id };
+  if (arr(raw, "steps").some((s) => s !== step && s.name === next)) throw new Conflict(`another step is already named "${next}"`);
+  step.name = next;
   return { changed: true, id: step.id };
 }
 

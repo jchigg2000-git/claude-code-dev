@@ -40,7 +40,9 @@ carries, which are content, not plan items.
   mirror should carry.
 - ⬜ **MIRROR-7 Sync is blind to sibling files.** `/sync-claude-slash` Phase 1 compares only
   `SKILL.md`, so a changed or added script inside an existing skill never reaches the mirror.
-  That is how MIRROR-6 went unnoticed.
+  That is how MIRROR-6 went unnoticed. Still unmirrored for the same reason:
+  `skills/machine-health/scripts/test_watchdog.py` (a new path, so absent from
+  `.provenance/first-party.txt` until attested).
 - ⬜ **MIRROR-8 `doc-consolidation` held out.** `usage_gate.py` reads the Claude Code OAuth token
   from the macOS Keychain to call the undocumented `api.anthropic.com/api/oauth/usage` endpoint.
   Rework that before the skill can be mirrored; until then every sync offers it again.

@@ -82,7 +82,8 @@ function renderMiniMarkdown(md) {
 // state file with the one-line-string shape still renders unchanged.
 function normalizeFinding(f, idx) {
   if (typeof f === "string" || f == null) {
-    return { id: `finding-${idx}`, summary: String(f ?? ""), detail: null, date: null, kind: null, importance: null };
+    const summary = String(f ?? "");
+    return { id: `finding-${idx}`, summary, detail: null, date: null, kind: null, importance: null, flagged: isFlagged(null, summary) };
   }
   const imp = Number(f.importance);
   return {
@@ -93,7 +94,15 @@ function normalizeFinding(f, idx) {
     kind: typeof f.kind === "string" && f.kind.trim() ? f.kind.trim().toLowerCase() : null,
     // Anything but 1, 2 or 3 (or nothing) is unscored, never an error.
     importance: imp === 1 || imp === 2 || imp === 3 ? imp : null,
+    flagged: isFlagged(f.tags, f.summary),
   };
+}
+
+// A finding flagged for the owner: `tags` holds "interesting" or "flagged" (any case), or the
+// summary opens with "★" (how keepers marked them before this pill existed).
+function isFlagged(tags, summary) {
+  const t = Array.isArray(tags) ? tags.map((x) => String(x).trim().toLowerCase()) : [];
+  return t.includes("interesting") || t.includes("flagged") || String(summary ?? "").trimStart().startsWith("★");
 }
 
 const impMeter = (n) =>
@@ -107,7 +116,7 @@ const impPill = (n) =>
 function findingItemHtml(f, order, hidden = false) {
   const tag = f.kind ? `<span class="ftag ${findingKindClass(f.kind)}">${esc(f.kind)}</span>` : "";
   const meta = `<span class="fmeta"><span class="fdate">${f.date ? esc(f.date) : "undated"}</span>${impPill(f.importance)}${tag}</span>`;
-  const data = `data-kind="${esc(f.kind || "")}" data-imp="${f.importance || 0}"${order == null ? "" : ` data-order="${order}"`}${hidden ? " hidden" : ""}`;
+  const data = `data-kind="${esc(f.kind || "")}" data-imp="${f.importance || 0}" data-flag="${f.flagged ? 1 : 0}"${order == null ? "" : ` data-order="${order}"`}${hidden ? " hidden" : ""}`;
   if (f.detail) {
     return `<li class="find-item clickable" tabindex="0" role="button" aria-haspopup="dialog" data-finding-id="${esc(f.id)}" ${data}>${meta}<span class="ftext">${esc(f.summary)} <span class="fmore">Read more&nbsp;&rsaquo;</span></span></li>`;
   }
@@ -249,6 +258,10 @@ export function render(state, ctx = {}) {
         .map((k) => pillBtn("imp", String(k), `${k ? impMeter(k) : ""}${IMPORTANCE[k].label}`, impCounts.get(k) || 0))
         .join("")
     : "";
+  const flaggedCount = findings.filter((f) => f.flagged).length;
+  const flagPillsHtml = flaggedCount
+    ? `<div class="fpills" role="group" aria-label="Filter to flagged findings"><span class="fpills-label" aria-hidden="true">Flagged</span>${pillBtn("flag", "1", "&#9733; Flagged", flaggedCount)}</div>`
+    : "";
   const kindPillsHtml = kindCounts.map(([k, n]) => pillBtn("kind", k, k ? esc(k) : "no kind", n)).join("");
   const firstPage = Math.min(FINDINGS_PAGE, findings.length);
   const moreLeft = findings.length - firstPage;
@@ -262,6 +275,7 @@ export function render(state, ctx = {}) {
           <button type="button" class="seg-btn" data-sort="importance" aria-pressed="false">Most important</button>
         </div>` : ""}
       </div>
+      ${flagPillsHtml}
       ${anyImportance ? `<div class="fpills" role="group" aria-label="Filter findings by importance"><span class="fpills-label" aria-hidden="true">Importance</span>${impPillsHtml}</div>` : ""}
       <div class="fpills" role="group" aria-label="Filter findings by kind"><span class="fpills-label" aria-hidden="true">Kind</span>${kindPillsHtml}</div>
       ${anyImportance ? `<p class="rubric"><strong>High</strong>: changes a headline result, finds or closes a path to a wrong result, or records your decision or a change of direction. <strong>Medium</strong>: a fix merged, a review, a measured experiment. <strong>Low</strong>: notes and housekeeping.</p>` : ""}
@@ -346,17 +360,29 @@ export function render(state, ctx = {}) {
     return `<div class="qratify-row"><button class="qratify-btn ${q.ratified ? "ratified" : ""}" data-id="${esc(q.id)}" data-ratified="${q.ratified ? "true" : "false"}" title="${esc(title)}" ${live ? "" : "disabled"}>${label}</button></div>`;
   };
 
+  // The asker's recommended answer, one click to accept. Accepting saves it as the owner's answer
+  // from the page, the same as typing it and pressing Save; ratifying stays a separate click.
+  const recommendControl = (q) => {
+    const rec = typeof q.recommendation === "string" ? q.recommendation.trim() : "";
+    if (!rec) return "";
+    return `<div class="qrec-row"><p class="qrec"><span class="qrec-label">Recommended:</span> ${esc(rec)}</p><button class="qaccept-btn" data-id="${esc(q.id)}" data-rec="${esc(rec)}" ${live ? "" : "disabled"}>Accept recommendation</button></div>`;
+  };
+
   const openQuestionCard = (q) => `
     <div class="qcard ${esc(q.severity)}" data-id="${esc(q.id)}" data-sev="${esc(q.severity ?? "")}">
       ${sevPill(q.severity)}
       <p class="qtext">${esc(q.question)}</p>
       ${q.context ? `<p class="qctx">${esc(q.context)}</p>` : ""}
+      ${recommendControl(q)}
       ${answerControls(q)}
     </div>`;
 
   // How the answer got into the file: the page writes answeredVia "page", the CLI's chat
   // recorder writes "chat" plus the owner's words verbatim; no answeredVia means a hand edit.
-  const answeredHow = (q) => (q.answeredVia === "page" ? "on the page" : q.answeredVia === "chat" ? "in chat" : "edited into the file");
+  const answeredHow = (q) =>
+    q.answeredVia === "page"
+      ? q.recommendation && q.answer === String(q.recommendation).trim() ? "on the page (accepted the recommendation)" : "on the page"
+      : q.answeredVia === "chat" ? "in chat" : "edited into the file";
   const answeredCard = (q) => `
     <div class="qcard qanswered ${esc(q.severity)}" data-id="${esc(q.id)}" data-sev="${esc(q.severity ?? "")}">
       ${sevPill(q.severity)}
@@ -618,6 +644,11 @@ export function render(state, ctx = {}) {
   .qanswer-row input[type=text]{flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13.5px}
   .qanswer-row button{padding:7px 14px;border:none;border-radius:6px;background:var(--blue-text);color:#fff;font-weight:600;font-size:13.5px;cursor:pointer}
   .qanswer-row button:disabled,.qanswer-row input:disabled{opacity:.55;cursor:not-allowed}
+  .qrec-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0 4px;padding:8px 10px;background:#f2f7fb;border:1px solid #dbe7f1;border-radius:6px}
+  .qrec{flex:1;min-width:200px;margin:0;font-size:13.5px;color:#243546}
+  .qrec-label{font-weight:700;color:var(--navy)}
+  .qrec-row button{padding:6px 12px;border:1px solid var(--blue-text);border-radius:6px;background:#fff;color:var(--blue-text);font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap}
+  .qrec-row button:disabled{opacity:.55;cursor:not-allowed}
   .qratify-row{margin-top:10px}
   .qratify-row button{padding:5px 12px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--navy);font-weight:600;font-size:12.5px;cursor:pointer}
   .qratify-row button.ratified{background:#eaf7ee;border-color:#c9e8d3;color:#1d6b38}
@@ -757,6 +788,18 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
     });
   });
 
+  document.querySelectorAll(".qaccept-btn").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      if (btn.disabled) return;
+      var rec = (btn.getAttribute("data-rec") || "").trim();
+      if (!rec) return;
+      btn.disabled = true;
+      var prevLabel = btn.textContent;
+      btn.textContent = "Accepting…";
+      postPatch({ id: btn.getAttribute("data-id"), answer: rec }, btn, prevLabel);
+    });
+  });
+
   document.querySelectorAll(".qratify-btn").forEach(function(btn){
     btn.addEventListener("click", function(){
       if (btn.disabled) return;
@@ -883,16 +926,18 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
   var FKEY = STORE + ":findings";
   var FPAGE = ${FINDINGS_PAGE};
   var flist = document.getElementById("findings-list");
-  var fview = { sort: "newest", kind: [], imp: [], shown: FPAGE };
+  var fview = { sort: "newest", kind: [], imp: [], flag: [], shown: FPAGE };
   (function loadFview(){
     var saved = readJson("localStorage", FKEY);
     if (!saved || typeof saved !== "object") return;
     if (saved.sort === "importance" && document.querySelector('#tab-findings .seg-btn[data-sort="importance"]')) fview.sort = "importance";
     if (Array.isArray(saved.kind)) fview.kind = saved.kind.map(String);
     if (Array.isArray(saved.imp)) fview.imp = saved.imp.map(String);
+    if (Array.isArray(saved.flag)) fview.flag = saved.flag.map(String);
     // A saved filter for a pill no longer on the page would hide everything with no way to undo it.
     fview.kind = fview.kind.filter(function(v){ return !!document.querySelector('#tab-findings .fpill[data-group="kind"][data-value="' + v + '"]'); });
     fview.imp = fview.imp.filter(function(v){ return !!document.querySelector('#tab-findings .fpill[data-group="imp"][data-value="' + v + '"]'); });
+    fview.flag = fview.flag.filter(function(v){ return !!document.querySelector('#tab-findings .fpill[data-group="flag"][data-value="' + v + '"]'); });
     if (typeof saved.shown === "number" && saved.shown > FPAGE) fview.shown = saved.shown;
   })();
   function applyFindings(focusFrom){
@@ -909,7 +954,8 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
     items.forEach(function(li){
       flist.appendChild(li);
       var ok = (!fview.kind.length || fview.kind.indexOf(li.getAttribute("data-kind")) !== -1) &&
-               (!fview.imp.length || fview.imp.indexOf(li.getAttribute("data-imp")) !== -1);
+               (!fview.imp.length || fview.imp.indexOf(li.getAttribute("data-imp")) !== -1) &&
+               (!fview.flag.length || fview.flag.indexOf(li.getAttribute("data-flag")) !== -1);
       if (ok) matched++;
       var vis = ok && matched <= fview.shown;
       if (vis) { shown++; if (focusFrom != null && shown === focusFrom + 1) firstNew = li; }
@@ -922,7 +968,7 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
     document.querySelectorAll("#tab-findings .seg-btn").forEach(function(b){
       b.setAttribute("aria-pressed", b.getAttribute("data-sort") === fview.sort ? "true" : "false");
     });
-    var filtered = fview.kind.length > 0 || fview.imp.length > 0;
+    var filtered = fview.kind.length > 0 || fview.imp.length > 0 || fview.flag.length > 0;
     var text = "Showing " + shown + " of " + matched + (filtered ? " matching (" + total + " in all)" : "") +
       " · " + (fview.sort === "importance" ? "most important first, newest first within each" : "newest first");
     var status = document.getElementById("findings-status");
@@ -962,7 +1008,7 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
   var fAll = document.getElementById("findings-all");
   if (fAll) fAll.addEventListener("click", function(){ var before = visibleFindings(); setFview(function(){ fview.shown = 100000; }, before); });
   var fClear = document.getElementById("findings-clear");
-  if (fClear) fClear.addEventListener("click", function(){ setFview(function(){ fview.kind = []; fview.imp = []; fview.shown = FPAGE; }); });
+  if (fClear) fClear.addEventListener("click", function(){ setFview(function(){ fview.kind = []; fview.imp = []; fview.flag = []; fview.shown = FPAGE; }); });
   applyFindings(null);
 
   // --- Questions: severity pills filter the three sections; each heading then says "n of N".

@@ -68,3 +68,22 @@ test("init --force on a file that parses replaces the steps and keeps everything
   assert.equal(s.findings[0].summary, "kept finding");
   assert.ok(!readdirSync(join(sb.repo, ".claude")).some((n) => n.includes(".bak")), "backup stays out of the worktree");
 });
+
+test("recommend and step rename: a recommendation is set, replaced and removed; a step keeps its id and state", () => {
+  const sb = sandbox();
+  sandboxes.push(sb);
+  sb.cli(["init", "--steps-json", '["CON-3f: old scope", "other"]']);
+  sb.cli(["ask", "--id", "q1", "--question", "Cert check?", "--recommend", "yes, as an option"]);
+  const read = () => JSON.parse(readFileSync(join(sb.repo, ".claude", "build-status.json"), "utf8"));
+  assert.equal(read().questions[0].recommendation, "yes, as an option");
+  sb.cli(["recommend", "q1", "yes, as a permission"]);
+  assert.equal(read().questions[0].recommendation, "yes, as a permission");
+  sb.cli(["recommend", "q1", ""]);
+  assert.ok(!("recommendation" in read().questions[0]), "an empty recommendation removes the field");
+  const before = read().steps.find((s) => s.name === "CON-3f: old scope");
+  sb.cli(["step", "rename", "CON-3f", "--name", "CON-3f: the cert check as a permission"]);
+  const after = read().steps.find((s) => s.id === before.id);
+  assert.deepEqual({ ...after, name: undefined }, { ...before, name: undefined });
+  assert.equal(after.name, "CON-3f: the cert check as a permission");
+  assert.equal(sb.cliStatus(["step", "rename", "CON-3f", "--name", "other"]).code, 3, "a name another step has is refused");
+});

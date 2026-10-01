@@ -15,9 +15,10 @@ const USAGE = `build-status <verb> [args] [--root DIR]
 
 Record (each is one locked, atomic, id-patched write):
   finding --summary TEXT [--kind K] [--importance 1-3] [--detail TEXT | --detail-file F] [--id ID] [--date YYYY-MM-DD]
-  ask --question TEXT [--severity red|amber|green] [--context TEXT] [--id ID]
+  ask --question TEXT [--severity red|amber|green] [--context TEXT] [--recommend TEXT] [--id ID]
+  recommend QID TEXT (the answer the page offers as "Accept recommendation"; recommend QID "" removes it)
   answer QID --via chat --quote TEXT | --quote-file F   (F = - reads stdin; the owner's words, verbatim)
-  step done MATCH | step set MATCH todo|active|done | step add NAME [--state S]
+  step done MATCH | step set MATCH todo|active|done | step add NAME [--state S] | step rename MATCH --name NAME
   note TEXT          (note "" clears it)
   phase TEXT         next-phase LABEL [--force]
   gate NAME STATUS
@@ -168,9 +169,16 @@ async function main() {
       if (!flags.question) fail(1, "ask needs --question");
       if (flags.severity && !["red", "amber", "green"].includes(flags.severity)) fail(1, "--severity is red, amber or green");
       await write(
-        (raw) => W.addQuestion(raw, { id: flags.id, question: flags.question, severity: flags.severity, context: flags.context }, { explicitId: Boolean(flags.id) }),
+        (raw) => W.addQuestion(raw, { id: flags.id, question: flags.question, severity: flags.severity, context: flags.context, recommendation: flags.recommend }, { explicitId: Boolean(flags.id) }),
         (r) => `question "${r.id}"`,
       );
+      return;
+    }
+    case "recommend": {
+      const [qid, ...text] = pos;
+      if (!qid || !text.length) fail(1, `recommend QID TEXT (recommend QID "" removes it)`);
+      const t = text.join(" ").trim();
+      await write((raw) => W.setRecommendation(raw, qid, t), (r) => `recommendation on "${r.id}" ${t ? "set" : "removed"}`);
       return;
     }
     case "answer": {
@@ -188,7 +196,10 @@ async function main() {
         const state = args.pop();
         await write((raw) => W.setStepState(raw, args.join(" "), state), (r) => `step ${r.id} ${state}`);
       } else if (sub === "add") await write((raw) => W.addStep(raw, args.join(" "), flags.state || "todo"), (r) => `step ${r.id ?? ""} added`);
-      else fail(1, "step done MATCH | step set MATCH STATE | step add NAME");
+      else if (sub === "rename") {
+        if (!args.length || typeof flags.name !== "string" || !flags.name.trim()) fail(1, "step rename MATCH --name NAME");
+        await write((raw) => W.renameStep(raw, args.join(" "), flags.name), (r) => `step ${r.id} renamed`);
+      } else fail(1, "step done MATCH | step set MATCH STATE | step add NAME | step rename MATCH --name NAME");
       return;
     }
     case "note":

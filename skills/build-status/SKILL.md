@@ -52,6 +52,7 @@ up into the git dir and replaced.
 |---|---|
 | *(none)*, `--refresh` | `bs render` — re-render; reuses the running page server, replaces it if its code is stale |
 | `--done <step>` | `bs step done "<step>"` (numeric id or name substring; ambiguous → it lists the steps and exits 3: pick, don't guess) |
+| `--rename <step> <name>` | `bs step rename "<step>" --name "<name>"` (same matching; keeps the step's id and state) |
 | `--finding <text>` | `bs finding --summary "<text>"`, adding `--kind`, `--importance`, `--detail-file` when you know them (section 5) |
 | `--note <text>` | `bs note "<text>"` (`bs note ""` clears) |
 | `--phase <text>` | `bs phase "<text>"` — renames; doesn't move on |
@@ -124,8 +125,12 @@ fenced blocks; everything else is escaped. Before a session ends, compare
 `git log --since=<newest finding's date>` with the log and record what's missing.
 
 **Questions for the owner** — only decisions a human must make, not TODOs you could resolve:
-`bs ask --question "..." --severity red|amber|green [--context "..."]` (red blocks work until
-answered; amber gets expensive to reverse; green is no rush). Unanswered is `answer: null`.
+`bs ask --question "..." --severity red|amber|green [--context "..."] --recommend "..."` (red
+blocks work until answered; amber gets expensive to reverse; green is no rush). Unanswered is
+`answer: null`. `--recommend` is the answer you'd take by default; the page shows it with an
+**Accept recommendation** button that saves it as the owner's answer from the page, just as Save
+does (ratifying stays a separate click). Set or change one later with `bs recommend <qid> "..."`
+(`""` removes it). A question with no recommendation gets no button; never write one in for it.
 
 **Answers given in chat**: `bs answer <qid> --via chat --quote-file -` with the owner's words,
 verbatim, on stdin (a quoted heredoc, as above).
@@ -146,8 +151,8 @@ which rewrites every non-ASCII character.
 `.claude/build-status.json` (or a repo's `tools/build-status.json`): `repo`, `phase`, `steps[]`
 (`{id, name, state: todo|active|done}`), `history[]` (closed phases), `gates[]`
 (`{name, status}`), `measures[]` (`{id, value, provenance}`), `findings[]` (objects as above, or
-plain strings), `note`, `questions[]` (`{id, question, severity, context, answer, answeredAt,
-answeredVia, answerQuote, ratified, ratifiedAt}`). Unknown keys are kept and ignored. Leave it
+plain strings), `note`, `questions[]` (`{id, question, severity, context, recommendation, answer,
+answeredAt, answeredVia, answerQuote, ratified, ratifiedAt}`). Unknown keys are kept and ignored. Leave it
 trackable unless the repo already ignores it; only the generated `build-status.html` is ignored,
 and `render` adds that rule itself.
 
