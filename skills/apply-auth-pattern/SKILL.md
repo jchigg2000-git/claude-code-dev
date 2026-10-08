@@ -168,9 +168,20 @@ users have trained themselves around a form that never prompts.
 ### Rate limiting & audit
 - Login: **5 attempts / 15 min per client IP** → 429. In-process store is fine;
   Redis-backed via `REDIS_URL` if the app scales horizontally.
-- Behind a proxy (Railway = one hop): take the **rightmost** X-Forwarded-For hop, or
-  set the framework's trust-proxy to exactly 1. Never trust the whole XFF chain; if
-  not behind a proxy, don't trust XFF at all.
+- Behind a proxy, trust a **hop count measured on the real deployment**
+  (`TRUST_PROXY_HOPS`): never the whole XFF chain, never `true`. Not behind a proxy:
+  0, don't read XFF at all.
+  - **Railway is 2 hops, not 1.** Its edge writes `client, edge`, so the client is the
+    **2nd entry from the right**. The rightmost entry is Railway's own address: keying
+    on it puts every visitor in one shared bucket and every audit row names the edge.
+  - **Fastify ≥ 5.12.1: pass a predicate**, `trustProxy: (_addr, hop) => hop < HOPS`.
+    A numeric `trustProxy` now fails closed: XFF is ignored, `req.ip` is the socket
+    peer, and one caller's failed logins lock everyone out. No trust-proxy setting
+    (e.g. Next.js route handlers): read the HOPS-th entry from the right yourself,
+    and if there are fewer entries than HOPS use a shared key, never the leftmost.
+  - A hop count can't validate the immediate peer, so it is only safe when the app is
+    **reachable solely through the proxy** (true of Railway's public domain). If it
+    can also be reached directly, trust the proxy's addresses instead of a count.
 - Audit events for login success/failure, logout, and account changes — into the
   app's existing observability/log channel (one-way dependency, best-effort, no
   secrets in events). Throttled 429s still get audited.
@@ -178,7 +189,8 @@ users have trained themselves around a form that never prompts.
 ### Env & config
 - Vars (names are the family convention — keep them): `AUTH_DB_PATH`,
   `AUTH_DATABASE_URL` (optional), `ADMIN_SEED_EMAIL`, `ADMIN_SEED_PASSWORD`,
-  `COOKIE_SECURE`, `REDIS_URL` (optional). Document every one in `.env.example` with
+  `COOKIE_SECURE`, `REDIS_URL` (optional), `TRUST_PROXY_HOPS` (default 0; Railway 2).
+  Document every one in `.env.example` with
   a comment; never write values.
 - Load env the way the target already does; if it has no loader, use the platform's
   native one (`node --env-file` / `process.loadEnvFile` / `load_local_env` pattern)
@@ -217,7 +229,11 @@ users have trained themselves around a form that never prompts.
 Wire into the target's existing test runner (never introduce a new framework). Minimum
 set: unauthenticated `/api/*` → 401; public allowlist reachable; wrong password and
 unknown email → identical 401; login → me → logout round-trip; admin route 403 for
-viewer; rate limit trips at 6th attempt; last-admin demote/delete rejected.
+viewer; rate limit trips at 6th attempt; last-admin demote/delete rejected; at
+`TRUST_PROXY_HOPS=2` the client IP is the 2nd XFF entry from the right and a forged
+leftmost entry doesn't change it (pins the hop count and catches a numeric
+`trustProxy` on Fastify ≥ 5.12.1). Run that test on a fresh install (`npm ci`): a
+stale `node_modules` on an older framework passes it.
 
 ## Closeout (required, every run)
 
@@ -225,5 +241,8 @@ viewer; rate limit trips at 6th attempt; last-admin demote/delete rejected.
 - **Skipped** — existing pieces left alone, and why.
 - **Manual follow-ups** — env vars the user must set (`ADMIN_SEED_*`, `COOKIE_SECURE`
   in prod), first-login password rotation, Railway/deploy config if the healthcheck
-  path changed.
+  path changed, `TRUST_PROXY_HOPS` on the deploy, and the post-deploy probe:
+  (1) two failed logins with different forged `X-Forwarded-For` values log the same
+  IP; (2) logins from two real networks (home Wi-Fi, phone hotspot) log different
+  IPs; (3) the logged IP is the owner's real public IP, not a proxy/edge address.
 - **Unverified** — anything not exercised end-to-end (e.g. couldn't run the app).

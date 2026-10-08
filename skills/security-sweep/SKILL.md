@@ -15,7 +15,8 @@ description: >-
 
 Thin detector on top of **autonomous-sweep-core** — that file owns the loop shape, ledger
 mechanics, repo ranking, resume, fan-out, and the never-destructive hard rules. This file only
-defines the secrets + dependency-vulnerability detector. Read the core first; do not restate it.
+defines the secrets + dependency-vulnerability (+ client-IP trust) detector. Read the core first;
+do not restate it.
 
 Treat every run as a **pre-open-source gate** — a live secret reachable in git history is the
 launch-blocking finding, not a nice-to-have.
@@ -39,8 +40,21 @@ value is still reachable from any commit.
 **(c) Dependency vulns — ecosystem-native only:** `npm audit --json` (Node),
 `pip-audit` / `safety` (Python), `govulncheck ./...` (Go), `bundler-audit` (Ruby). Count crit/high.
 
+**(d) Client-IP trust** — the key a login limiter and audit log use. `rg -n -i
+'trustProxy|trust proxy|TRUST_PROXY|x-forwarded-for'` (skip `node_modules`), then read each hit:
+- **Numeric Fastify `trustProxy`** (a literal, or a parsed env var passed through) on a
+  **locked** Fastify ≥ 5.12.1 → fails closed: XFF ignored, every visitor shares one bucket, one
+  caller locks everyone out. Fix is the predicate `(_addr, hop) => hop < HOPS`.
+- **Whole chain trusted** — `trustProxy: true`, `'trust proxy', true`, or a default that resolves
+  to `true` on a platform → `req.ip` is the client-supplied leftmost entry; a fresh bucket per
+  request. Same for a hand-rolled read of the **leftmost** XFF entry (`split(',')[0]`).
+- **Rightmost-only XFF read** (`[length - 1]`, `.at(-1)`, `.pop()`) or a hop count of 1 on
+  **Railway** → keys on Railway's edge address; its edge writes `client, edge`, so the client is
+  the 2nd entry from the right (`TRUST_PROXY_HOPS=2`).
+
 **The gate — "actually exposed":** flag ONLY a real live-looking credential or a confirmed
-advisory. A candidate is NOT exposed if it is a placeholder/example (`your-api-key-here`,
+advisory. (d) counts only when the app is deployed behind a proxy and the IP feeds a rate
+limiter or audit log. A candidate is NOT exposed if it is a placeholder/example (`your-api-key-here`,
 `sk-xxxx`, obvious fakes in docs/tests/`.env.example`), or a dev-only dependency whose vuln is not
 reachable in the shipped artifact. Verify every candidate before it earns a ledger row.
 
@@ -61,7 +75,7 @@ and `git rm --cached` a tracked file that should be ignored. Everything else is 
   fingerprint (first 4 + last 4, middle redacted), never the raw value.
 
 ## LEDGER COLUMNS
-`secrets-tree | secrets-history | gitignore-gaps | dep-vulns(crit/high) | worst-severity | note`
+`secrets-tree | secrets-history | gitignore-gaps | dep-vulns(crit/high) | client-ip-trust | worst-severity | note`
 
 ## Domain lessons
 - **Mask, never paste.** The ledger and detail log record `file:line` + a masked fingerprint;
@@ -75,3 +89,7 @@ and `git rm --cached` a tracked file that should be ignored. Everything else is 
 - **Runtime CVE > dev-dep CVE.** A vuln in a dependency that never ships in the built artifact
   (test/build tooling) is real but lower priority than a runtime-dependency CVE reachable in prod;
   rank the ledger accordingly so the launch-blockers surface first.
+- **Read the lockfile, not `node_modules`.** A dependency bump (e.g. `npm audit fix`) can change
+  a framework's proxy semantics in the lockfile while a stale local install still runs the old
+  version — the deploy builds from the lockfile, so local tests pass and prod breaks. Verify a
+  client-IP finding with a forged-header probe on the live app, not a local run.
