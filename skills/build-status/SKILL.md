@@ -186,8 +186,8 @@ which rewrites every non-ASCII character.
 (`{id, name, state: todo|active|done}`), `history[]` (closed phases), `gates[]`
 (`{name, status}`), `measures[]` (`{id, value, provenance}`), `findings[]` (objects as above, or
 plain strings), `note`, `questions[]` (`{id, question, severity, context, recommendation, rationale, answer,
-answeredAt, answeredVia, answerQuote, editedAt, confirmed, confirmedAt, actedAt, actedNote}`; an
-older file's `ratified` counts as confirmed), `comments[]` (`{id, text, priority:
+answeredAt, answeredVia, answerQuote, editedAt, confirmed, confirmedAt, actedAt, actedNote}`; a
+`ratified` from before 2026-10-09, when Ratify was retired, counts as confirmed), `comments[]` (`{id, text, priority:
 low|normal|high|urgent, via, at, status: new|held|sent|filed|done|declined, statusAt, note, trail}`). Unknown keys are kept and ignored. Leave it
 trackable unless the repo already ignores it; only the generated `build-status.html` is ignored,
 and `render` adds that rule itself.

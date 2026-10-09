@@ -155,4 +155,13 @@ test("Confirm and acted hide an answered question; Edit's changed answer unsettl
   const q5 = state().questions.find((q) => q.id === "q5");
   assert.deepEqual([q5.actedAt, q5.actedNote], [undefined, undefined], "a changed answer hasn't been acted on yet");
   assert.match(await page(), /class="qconfirm-btn" data-id="q5"/);
+  // Ratify read as a go-ahead: one from before it was retired settles, one from that day on doesn't.
+  const path = join(sb.repo, ".claude", "build-status.json");
+  const s = state();
+  s.questions.find((q) => q.id === "q1").ratifiedAt = "2026-10-08T21:00:00-05:00";
+  s.questions.find((q) => q.id === "q2").ratifiedAt = "2026-10-09T19:00:00-05:00";
+  for (const id of ["q1", "q2"]) s.questions.find((q) => q.id === id).ratified = true;
+  writeFileSync(path, JSON.stringify(s, null, 2) + "\n");
+  html = await page();
+  assert.ok(!html.includes('data-id="q1"') && html.includes('class="qconfirm-btn" data-id="q2"'));
 });

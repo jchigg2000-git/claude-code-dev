@@ -3,6 +3,8 @@
 // ctx, gathered by page.mjs. No fs, no git, no process state in here — so the CLI, the daemon and
 // (later) a hub can all render the same page, and a repo-specific layer can add tabs through
 // ctx.extraTabs without touching this file.
+import { isSettled } from "./normalize.mjs";
+
 const esc = (s) =>
   String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
@@ -365,7 +367,6 @@ export function render(state, ctx = {}) {
   // labelled updated) and Confirm hides the question for good. Neither is needed before the build
   // acts: an answer is worked as soon as it's given, and the question hides itself once the build
   // records that it acted on it (`acted`).
-  const isSettled = (q) => Boolean(q.confirmed || q.ratified || q.actedAt);
   const answeredControls = (q) => `
       <div class="qdone-row"><button type="button" class="qedit-btn" data-id="${esc(q.id)}" data-answer="${esc(q.answer)}" ${live ? "" : "disabled"}>Edit</button><button type="button" class="qconfirm-btn" data-id="${esc(q.id)}" title="Done with this question: hide it for good." ${live ? "" : "disabled"}>Confirm</button></div>
       ${live ? `<div class="qanswer-row qedit-row" data-id="${esc(q.id)}" hidden><input type="text" class="qanswer-input" data-id="${esc(q.id)}" aria-label="Edit your answer"><button class="qsave-btn" data-id="${esc(q.id)}">Save</button><button type="button" class="qcancel-btn" data-id="${esc(q.id)}">Cancel</button></div>` : ""}`;
@@ -407,7 +408,7 @@ export function render(state, ctx = {}) {
     </div>`;
 
   // Open first (worst severity first), then answered and still being worked, newest first. Settled
-  // ones (confirmed, acted on, or ratified before Confirm existed) are hidden, and a line says how
+  // ones (confirmed, acted on, or ratified before Ratify was retired) are hidden, and a line says how
   // many. The severity pills filter what's shown.
   const settled = answered.filter(isSettled);
   const working = answered.filter((q) => !isSettled(q));

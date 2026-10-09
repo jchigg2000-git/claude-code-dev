@@ -32,9 +32,20 @@ For each file in `$MIRROR/commands/*.md`:
    - **Yes + differs:** copy the harness version over the mirror version. Report one line: `updated commands/<name>.md` plus a tag — `(description only)` if only the YAML `description:` field changed, otherwise `(body changed)`.
    - **No:** report `commands/<name>.md: repo-only (not in harness, kept as-is)`.
 
-For each `$MIRROR/skills/<name>/SKILL.md`:
+For each skill directory `$MIRROR/skills/<name>/` (every directory, whether or not it has a `SKILL.md`), compare the **whole tree**, not just `SKILL.md` — a changed or added script, test or asset inside an existing skill must reach the mirror too:
 
-- Same logic against `~/.claude/skills/<name>/SKILL.md`.
+- If `~/.claude/skills/<name>/` doesn't exist → report `skills/<name>/: repo-only (not in harness, kept as-is)` and move on.
+- Otherwise list the differences, skipping build cruft the mirror's `.gitignore` already drops:
+  ```
+  X=(--exclude node_modules --exclude .DS_Store --exclude __pycache__ --exclude '*.pyc')
+  rsync -rcn --out-format='%n' "${X[@]}" ~/.claude/skills/<name>/ "$MIRROR/skills/<name>/" | grep -v '/$'   # harness → mirror: changed or new
+  rsync -rcn --out-format='%n' --ignore-existing "${X[@]}" "$MIRROR/skills/<name>/" ~/.claude/skills/<name>/ | grep -v '/$'   # mirror-only
+  ```
+- **Changed file** (exists in both, differs): copy the harness version over it. Report `updated skills/<name>/<file>`; for `SKILL.md` add the `(description only)` / `(body changed)` tag as for commands.
+- **New file inside an existing skill** (harness only): copy it. Report `added skills/<name>/<file> (new file in existing skill)`. It is a new path, so Phase 2.5 will hold it until the user attests it.
+- **Mirror-only file inside a skill:** never delete it. Report `skills/<name>/<file>: repo-only (kept)` — it may be a file the harness renamed (e.g. `SKILL.md` → `SKILL.md.disabled`), so surface it for the user to decide.
+
+Never use `rsync --delete`, and copy file-by-file from the lists above rather than syncing the directory blind.
 
 Do not touch anything outside `$MIRROR/commands/` and `$MIRROR/skills/`. Do not write to `~/.claude/` at any point.
 
@@ -83,7 +94,7 @@ python3 "$MIRROR/scripts/provenance-gate.py" --paths <each updated/added path>
 ```
 
 - **Exit 0** → continue to closeout (or Phase 3 if `--ship`).
-- **Exit 1** → the gate found content that doesn't look first-party. **Revert exactly what this run wrote for the blocked paths** (`git -C "$MIRROR" checkout -- <path>` for a Phase 1 update; `rm -rf` the directory or file for a Phase 2 addition), then report each blocked path with the rule that fired. Do **not** attest on the user's behalf, do **not** add an exceptions line, and do **not** pass `--no-verify` downstream. Attestation is the user's judgment, not this command's — surface the finding and let them decide.
+- **Exit 1** → the gate found content that doesn't look first-party. **Revert exactly what this run wrote for the blocked paths** (`git -C "$MIRROR" checkout -- <path>` for a Phase 1 update of a tracked file; `rm` for a file Phase 1 added inside an existing skill; `rm -rf` the directory or file for a Phase 2 addition), then report each blocked path with the rule that fired. Do **not** attest on the user's behalf, do **not** add an exceptions line, and do **not** pass `--no-verify` downstream. Attestation is the user's judgment, not this command's — surface the finding and let them decide.
 - **Exit 2** → the gate is misconfigured (missing/empty `.provenance/first-party.txt`). Report it and stop before committing anything.
 
 Warnings (`fat-skill-tree`, `unreviewed-install-hint`) do not block, but pass them through to the closeout verbatim — a fat new skill directory is the single strongest signal that something was vendored.

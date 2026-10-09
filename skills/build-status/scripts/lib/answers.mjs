@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, renameSync, statSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { ensureDir, git, homePath, listWorktrees, loadConfig, repoKey } from "./paths.mjs";
+import { isSettled } from "./normalize.mjs";
 import { loadState, locate } from "./state.mjs";
 
 const MAX_ITEMS = 5;
@@ -54,7 +55,7 @@ export async function collectAnswers(co) {
       const version = versionOf(q);
       const hit = byVersion.get(`${q.id}:${version}`);
       if (hit) hit.checkouts.push(wt);
-      else byVersion.set(`${q.id}:${version}`, { qid: String(q.id), question: q.question ?? "", severity: q.severity ?? "", answer: String(q.answer), answeredAt: q.answeredAt ?? null, answeredVia: q.answeredVia ?? null, answerQuote: q.answerQuote ?? null, edited: Boolean(q.editedAt), settled: Boolean(q.confirmed || q.ratified || q.actedAt), version, checkouts: [wt] });
+      else byVersion.set(`${q.id}:${version}`, { qid: String(q.id), question: q.question ?? "", severity: q.severity ?? "", answer: String(q.answer), answeredAt: q.answeredAt ?? null, answeredVia: q.answeredVia ?? null, answerQuote: q.answerQuote ?? null, edited: Boolean(q.editedAt), settled: isSettled(q), version, checkouts: [wt] });
     }
   }
   return [...byVersion.values()].sort((a, b) => (ms(a.answeredAt) ?? 0) - (ms(b.answeredAt) ?? 0));
@@ -210,7 +211,7 @@ export async function awaitAnswer(co, loc, qid, timeoutMs) {
     }
   };
   const report = (q) => {
-    const item = { qid: String(q.id), question: q.question ?? "", severity: q.severity ?? "", answer: String(q.answer), answeredAt: q.answeredAt, answeredVia: q.answeredVia, edited: Boolean(q.editedAt), settled: Boolean(q.confirmed || q.ratified || q.actedAt), version: versionOf(q), checkouts: [co.root] };
+    const item = { qid: String(q.id), question: q.question ?? "", severity: q.severity ?? "", answer: String(q.answer), answeredAt: q.answeredAt, answeredVia: q.answeredVia, edited: Boolean(q.editedAt), settled: isSettled(q), version: versionOf(q), checkouts: [co.root] };
     markDelivered(co, [item], process.env.CLAUDE_CODE_SESSION_ID, null);
     console.log(formatBlock(co, [item]));
   };

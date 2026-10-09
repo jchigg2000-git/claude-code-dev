@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { checkoutFile, ensureDir, homePath, localDate, localIso } from "./paths.mjs";
+export { isSettled } from "./normalize.mjs";
 
 export class LockTimeout extends Error {
   constructor(holder, waitedMs) {
@@ -376,10 +377,6 @@ function findQuestion(raw, id) {
   if (!q) throw new Conflict(`no question with id "${id}"`);
   return q;
 }
-
-// A question is settled once the owner confirms it or the build has acted on its answer (or, from
-// before Confirm existed, it was ratified). The page hides settled questions.
-export const isSettled = (q) => Boolean(q && q.answer != null && String(q.answer).trim() && (q.confirmed || q.ratified || q.actedAt));
 
 // An answer from the page (`via: "page"`) or recorded from chat (`via: "chat"`, with the owner's
 // words verbatim in `answerQuote`). The same text again is a no-op, so a retried save can't

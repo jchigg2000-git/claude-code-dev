@@ -33,11 +33,6 @@ carries, which are content, not plan items.
   gate's `SOURCE_ROOTS`: a change there is a sync of content authored in `~/.claude/`, not a
   unit of work this file tracks, and including them would fire the gate on every
   `/sync-claude-slash --ship`. Revisit only if the mirror starts carrying original work.
-- ⬜ **MIRROR-7 Sync is blind to sibling files.** `/sync-claude-slash` Phase 1 compares only
-  `SKILL.md`, so a changed or added script inside an existing skill never reaches the mirror.
-  The 2026-10-09 sync caught the backlog up by hand (build-status, lead-keeper, machine-health,
-  ux-tournament, shipit trees); the fix is a whole-tree compare in the harness copy of the
-  command, so the next drift doesn't wait for someone to notice.
 - ⬜ **MIRROR-8 `doc-consolidation` held out.** `usage_gate.py` reads the Claude Code OAuth token
   from the macOS Keychain to call the undocumented `api.anthropic.com/api/oauth/usage` endpoint.
   Rework that before the skill can be mirrored; until then every sync offers it again.
