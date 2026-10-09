@@ -3,8 +3,8 @@
 //
 // The front door is checked before anything else, on every route: a Host
 // other than 127.0.0.1:<port> or localhost:<port> is refused (DNS rebinding), a preflight gets
-// 405, and no CORS header is ever sent. /answer also needs an Origin that is this page's own and
-// a JSON body under 64 KB — measured on the old daemon, a cross-site text/plain POST wrote a
+// 405, and no CORS header is ever sent. /answer and /comment also need an Origin that is this
+// page's own and a JSON body under 64 KB — measured on the old daemon, a cross-site text/plain POST wrote a
 // forged answer and a 50 MB body went straight into the state file.
 //
 // GET renders into the response only; it never writes the HTML file (a stale daemon used to
@@ -107,30 +107,68 @@ export async function runDaemon({ root, key, port = 0 }) {
     return send(res, 200, html, headers);
   }
 
-  async function answer(req, res) {
+  // The front door every POST shares: this page's own Origin, a JSON body, under 64 KB. Returns
+  // {msg}, or null once it has answered the request itself.
+  async function readPost(req, res) {
     const drain = () => req.resume();
     if (!origins().has(String(req.headers.origin || ""))) {
       drain();
-      return json(res, 403, { ok: false, error: "cross-origin or origin-less requests are refused" });
+      json(res, 403, { ok: false, error: "cross-origin or origin-less requests are refused" });
+      return null;
     }
     if (!String(req.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
       drain();
-      return json(res, 415, { ok: false, error: "send application/json" });
+      json(res, 415, { ok: false, error: "send application/json" });
+      return null;
     }
     if (Number(req.headers["content-length"]) > MAX_BODY) {
       drain();
-      return json(res, 413, { ok: false, error: "body too large" }, { connection: "close" });
+      json(res, 413, { ok: false, error: "body too large" }, { connection: "close" });
+      return null;
     }
-    let msg;
     try {
-      msg = JSON.parse(await readBody(req, MAX_BODY));
+      return { msg: JSON.parse(await readBody(req, MAX_BODY)) };
     } catch (err) {
-      return json(res, err.status || 400, { ok: false, error: err.status ? "body too large" : "body is not JSON" });
+      json(res, err.status || 400, { ok: false, error: err.status ? "body too large" : "body is not JSON" });
+      return null;
     }
+  }
+
+  // A new comment ({text, priority}) or a changed priority on an open one ({id, priority}).
+  async function comment(req, res) {
+    const got = await readPost(req, res);
+    if (!got) return;
+    const msg = got.msg;
+    const priority = typeof msg?.priority === "string" ? msg.priority : undefined;
+    const hasText = typeof msg?.text === "string" && msg.text.trim().length > 0;
+    const id = typeof msg?.id === "string" ? msg.id : null;
+    if (!hasText && !(id && priority)) return json(res, 400, { ok: false, error: "text (a new comment), or id and priority, required" });
+    try {
+      const r = await W.mutate(
+        co,
+        loc.statePath,
+        (raw) => (hasText ? W.addComment(raw, { text: msg.text, priority: priority ?? "normal", via: "page" }) : W.setCommentPriority(raw, id, priority)),
+        { waitMs: 2000, who: "daemon" },
+      );
+      cache = null;
+      return json(res, 200, { ok: true, id: r.id });
+    } catch (err) {
+      if (err.code === "LOCK_TIMEOUT") return json(res, 503, { ok: false, error: "busy, try again" });
+      if (err.code === "CONFLICT") return json(res, 400, { ok: false, error: err.message });
+      if (err.code === "UNPARSEABLE") return json(res, 503, { ok: false, error: "the state file doesn't parse right now; try again" });
+      throw err;
+    }
+  }
+
+  async function answer(req, res) {
+    const got = await readPost(req, res);
+    if (!got) return;
+    const msg = got.msg;
     const id = msg && msg.id;
     const hasAnswer = typeof msg?.answer === "string" && msg.answer.trim().length > 0;
-    const hasRatify = typeof msg?.ratified === "boolean";
-    if (!id || (!hasAnswer && !hasRatify)) return json(res, 400, { ok: false, error: "id and (a non-empty answer or ratified) required" });
+    // Confirm only ever sets; `ratified: true` is what a tab still showing the old page sends.
+    const hasConfirm = msg?.confirmed === true || msg?.ratified === true;
+    if (!id || (!hasAnswer && !hasConfirm)) return json(res, 400, { ok: false, error: "id and (a non-empty answer or confirmed: true) required" });
     try {
       await W.mutate(
         co,
@@ -138,7 +176,7 @@ export async function runDaemon({ root, key, port = 0 }) {
         (raw) => {
           let changed = false;
           if (hasAnswer) changed = W.setAnswer(raw, id, { answer: msg.answer, via: "page" }).changed || changed;
-          if (hasRatify) changed = W.setRatified(raw, id, msg.ratified).changed || changed;
+          if (hasConfirm) changed = W.setConfirmed(raw, id).changed || changed;
           return { changed };
         },
         { waitMs: 2000, who: "daemon" },
@@ -164,6 +202,10 @@ export async function runDaemon({ root, key, port = 0 }) {
     if (path === "/answer") {
       if (req.method !== "POST") return json(res, 405, { ok: false, error: "method not allowed" }, { allow: "POST" });
       return answer(req, res);
+    }
+    if (path === "/comment") {
+      if (req.method !== "POST") return json(res, 405, { ok: false, error: "method not allowed" }, { allow: "POST" });
+      return comment(req, res);
     }
     return json(res, 404, { ok: false, error: "not found" });
   }

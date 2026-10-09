@@ -3,3 +3,4 @@
 # Rule `*` waives every rule for that path. Do not add a path you have not read.
 commands/harden-licenses.md	foreign-copyright	This command detects license strings; "All rights reserved" at line 112 is a proprietary-license *pattern it looks for*, not a claim over this file.
 README.md	vendor-llm-docs	The Provenance gate section names the rules it enforces; the literal "llms.txt" at line 129 is documentation of a detection pattern, not a citation of a vendor docs feed.
+skills/lipstick-on-a-deadline/package.json	bundled-package-file	Private 4-line type:module marker so the skill .js files load as ESM; not a published package. Owner approved 2026-10-09.

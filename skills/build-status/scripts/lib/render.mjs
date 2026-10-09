@@ -169,7 +169,16 @@ function faviconHref(title, severity) {
   return "data:image/svg+xml," + encodeURIComponent(svg);
 }
 
-// live: whether a server is actually reachable for this repo right now (so Save/Ratify work).
+// What each comment priority means for the owner; the composer shows the chosen one's line.
+const COMMENT_PRIORITIES = [["low", "Low"], ["normal", "Normal"], ["high", "High"], ["urgent", "Urgent"]];
+const COMMENT_HINTS = {
+  low: "Whenever it fits: the keeper holds it and passes it on with others at a step's end. It may go straight to the backlog.",
+  normal: "At the build's next break (a step done, a merge), within the hour. The build does it, files it, or declines with a reason.",
+  high: "Within about 10 minutes, before the build starts its next piece of work. It must weigh it and say what it will do.",
+  urgent: "Now. The build stops at the next safe point and deals with it. If it disagrees, it asks you rather than carry on.",
+};
+
+// live: whether a server is actually reachable for this repo right now (so Save/Confirm work).
 // reason: one-line explanation when live is false, shown as a hint instead of failing silently.
 
 export function render(state, ctx = {}) {
@@ -352,20 +361,23 @@ export function render(state, ctx = {}) {
     return `<div class="qanswer-row"><input type="text" class="qanswer-input" data-id="${esc(q.id)}" placeholder="Answer&hellip;"><button class="qsave-btn" data-id="${esc(q.id)}">Save</button></div>`;
   };
 
-  const ratifyControl = (q) => {
-    const label = q.ratified ? "Un-ratify" : "Ratify";
-    const title = q.ratified
-      ? "Reopen this — treat the decision as unsettled again."
-      : "Mark this decision settled — it stops being flagged as needing a look.";
-    return `<div class="qratify-row"><button class="qratify-btn ${q.ratified ? "ratified" : ""}" data-id="${esc(q.id)}" data-ratified="${q.ratified ? "true" : "false"}" title="${esc(title)}" ${live ? "" : "disabled"}>${label}</button></div>`;
-  };
+  // Answered and not yet settled: Edit reopens the answer in place (the build hears the new one,
+  // labelled updated) and Confirm hides the question for good. Neither is needed before the build
+  // acts: an answer is worked as soon as it's given, and the question hides itself once the build
+  // records that it acted on it (`acted`).
+  const isSettled = (q) => Boolean(q.confirmed || q.ratified || q.actedAt);
+  const answeredControls = (q) => `
+      <div class="qdone-row"><button type="button" class="qedit-btn" data-id="${esc(q.id)}" data-answer="${esc(q.answer)}" ${live ? "" : "disabled"}>Edit</button><button type="button" class="qconfirm-btn" data-id="${esc(q.id)}" title="Done with this question: hide it for good." ${live ? "" : "disabled"}>Confirm</button></div>
+      ${live ? `<div class="qanswer-row qedit-row" data-id="${esc(q.id)}" hidden><input type="text" class="qanswer-input" data-id="${esc(q.id)}" aria-label="Edit your answer"><button class="qsave-btn" data-id="${esc(q.id)}">Save</button><button type="button" class="qcancel-btn" data-id="${esc(q.id)}">Cancel</button></div>` : ""}`;
 
-  // The asker's recommended answer, one click to accept. Accepting saves it as the owner's answer
-  // from the page, the same as typing it and pressing Save; ratifying stays a separate click.
+  // The asker's recommended answer and why, one click to accept. Accepting saves the
+  // recommendation (not the rationale) as the owner's answer from the page, the same as typing it
+  // and pressing Save; confirming stays a separate click. A question missing one says so.
   const recommendControl = (q) => {
     const rec = typeof q.recommendation === "string" ? q.recommendation.trim() : "";
-    if (!rec) return "";
-    return `<div class="qrec-row"><p class="qrec"><span class="qrec-label">Recommended:</span> ${esc(rec)}</p><button class="qaccept-btn" data-id="${esc(q.id)}" data-rec="${esc(rec)}" ${live ? "" : "disabled"}>Accept recommendation</button></div>`;
+    if (!rec) return `<p class="qrec-missing">No recommendation yet.</p>`;
+    const why = typeof q.rationale === "string" ? q.rationale.trim() : "";
+    return `<div class="qrec-row"><div class="qrec-text"><p class="qrec"><span class="qrec-label">Recommended:</span> ${esc(rec)}</p>${why ? `<p class="qwhy"><span class="qrec-label">Why:</span> ${esc(why)}</p>` : ""}</div><button class="qaccept-btn" data-id="${esc(q.id)}" data-rec="${esc(rec)}" ${live ? "" : "disabled"}>Accept recommendation</button></div>`;
   };
 
   const openQuestionCard = (q) => `
@@ -386,50 +398,51 @@ export function render(state, ctx = {}) {
   const answeredCard = (q) => `
     <div class="qcard qanswered ${esc(q.severity)}" data-id="${esc(q.id)}" data-sev="${esc(q.severity ?? "")}">
       ${sevPill(q.severity)}
-      <span class="qtag ${q.ratified ? "ratified" : "needs"}">${q.ratified ? "ratified" : "not yet confirmed"}</span>
       <p class="qtext">${esc(q.question)}</p>
       ${q.context ? `<p class="qctx">${esc(q.context)}</p>` : ""}
       <p class="qanswer-text">${esc(q.answer)}</p>
       ${q.answerQuote && q.answerQuote !== q.answer ? `<blockquote class="qquote">${esc(q.answerQuote)}</blockquote>` : ""}
-      <div class="qmeta">answered ${answeredHow(q)} ${esc(q.answeredAt ? new Date(q.answeredAt).toLocaleString() : "")}${q.ratified ? ` &middot; ratified ${esc(q.ratifiedAt ? new Date(q.ratifiedAt).toLocaleString() : "")}` : ""}</div>
-      ${ratifyControl(q)}
+      <div class="qmeta">answered ${answeredHow(q)} ${esc(q.answeredAt ? new Date(q.answeredAt).toLocaleString() : "")}${q.editedAt ? " &middot; edited" : ""}</div>
+      ${answeredControls(q)}
     </div>`;
 
-  // Unanswered first (worst severity first), then answered but not yet ratified with the answer
-  // shown, then the ratified ones folded away with a count. The severity pills filter all three.
-  const awaiting = answered.filter((q) => !q.ratified);
-  const ratified = answered.filter((q) => q.ratified);
-  const sevCounts = countBy(questions, (q) => String(q.severity ?? ""));
+  // Open first (worst severity first), then answered and still being worked, newest first. Settled
+  // ones (confirmed, acted on, or ratified before Confirm existed) are hidden, and a line says how
+  // many. The severity pills filter what's shown.
+  const settled = answered.filter(isSettled);
+  const working = answered.filter((q) => !isSettled(q));
+  const shownQuestions = [...unanswered, ...working];
+  const sevCounts = countBy(shownQuestions, (q) => String(q.severity ?? ""));
   const sevOrder = [...sevCounts.keys()].sort((a, b) => (SEVERITY_RANK[b] ?? 0) - (SEVERITY_RANK[a] ?? 0) || a.localeCompare(b));
   const sevPillsHtml = sevOrder
     .map((k) => `<button type="button" class="fpill" data-group="sev" data-value="${esc(k)}" aria-pressed="false"><span class="sev-dot ${esc(k)}" aria-hidden="true"></span>${k ? esc(k) : "no severity"} <span class="fcount">${sevCounts.get(k)}</span></button>`)
     .join("");
   const secCount = (n) => `<span class="qsec-count" data-total="${n}">${n}</span>`;
-  const questionsTabHtml = questions.length
+  const settledNote = settled.length
+    ? `<p class="qsettled">${settled.length} settled question${settled.length === 1 ? "" : "s"} hidden: confirmed by you, or acted on by the build.</p>`
+    : "";
+  const questionsTabHtml = shownQuestions.length
     ? `
     <div class="qfilter-bar">
       <div class="fpills" role="group" aria-label="Filter questions by severity"><span class="fpills-label" aria-hidden="true">Severity</span>${sevPillsHtml}</div>
-      <div class="fstatus-row"><span id="q-status" class="fstatus" role="status" aria-live="polite">All ${questions.length} questions</span><button type="button" id="q-clear" class="linkbtn" hidden>Clear filter</button></div>
+      <div class="fstatus-row"><span id="q-status" class="fstatus" role="status" aria-live="polite">All ${shownQuestions.length} questions</span><button type="button" id="q-clear" class="linkbtn" hidden>Clear filter</button></div>
     </div>
     <div class="card qsection">
       <h2>Open &middot; ${secCount(unanswered.length)}</h2>
       ${unanswered.length ? unanswered.map(openQuestionCard).join("") : `<div class="qempty">Nothing open &mdash; all caught up.</div>`}
     </div>
     <div class="card qsection">
-      <h2>Answered, not yet ratified &middot; ${secCount(awaiting.length)}</h2>
-      ${awaiting.length ? `<p class="qexplain">Answered means you replied. Ratified means you've confirmed it's settled and it should stop coming back. Nothing breaks if you leave something unratified.</p>${awaiting.map(answeredCard).join("")}` : `<div class="qempty">Nothing waiting to be ratified.</div>`}
+      <h2>Answered &middot; ${secCount(working.length)}</h2>
+      ${working.length ? `<p class="qexplain">The build acts on an answer as soon as you give it; nothing waits for you to confirm. Edit changes your answer, and the build hears the new one. Confirm hides a question for good, and it hides by itself once the build has acted on it.</p>${working.map(answeredCard).join("")}` : `<div class="qempty">No answer is still being worked.</div>`}
     </div>
-    <details class="card qsection" id="q-ratified">
-      <summary><h2>Ratified &middot; ${secCount(ratified.length)}</h2><span class="summary-hint">show</span></summary>
-      ${ratified.length ? ratified.map(answeredCard).join("") : `<div class="qempty">Nothing ratified yet.</div>`}
-    </details>`
-    : `<div class="card"><div class="qempty">No open questions right now.</div></div>`;
+    ${settledNote}`
+    : `<div class="card"><div class="qempty">No open questions right now.</div>${settledNote}</div>`;
 
   const overviewQuestionsHtml = `
       <div class="qstats">
         <div class="qstat"><strong>${unanswered.length}</strong> open</div>
-        <div class="qstat"><strong>${awaiting.length}</strong> answered, not yet ratified</div>
-        <div class="qstat"><strong>${ratified.length}</strong> ratified</div>
+        <div class="qstat"><strong>${working.length}</strong> answered, being worked</div>
+        <div class="qstat"><strong>${settled.length}</strong> settled</div>
       </div>
       ${
         unanswered.length
@@ -439,7 +452,45 @@ export function render(state, ctx = {}) {
               .join("")}</ul>${unanswered.length > 5 ? `<p class="qmore">and ${unanswered.length - 5} more</p>` : ""}`
           : `<p class="qempty">Nothing open &mdash; all caught up.</p>`
       }
-      <button type="button" class="linkbtn goto" data-goto="questions">${unanswered.length ? "Answer them" : awaiting.length ? "Review and ratify" : "Open questions"} &rsaquo;</button>`;
+      <button type="button" class="linkbtn goto" data-goto="questions">${unanswered.length ? "Answer them" : working.length ? "Review answers" : "Open questions"} &rsaquo;</button>`;
+
+  // --- Comments: the owner's notes to the build. The keeper passes each to the main session when
+  // its priority says (SKILL.md §5) and records what became of it; the card shows where each
+  // stands. The box is a .qanswer-input, so a half-typed comment holds the refresh and survives it.
+  const PRIORITY_RANK = { urgent: 4, high: 3, normal: 2, low: 1 };
+  const OPEN_COMMENT = new Set(["new", "held", "sent"]);
+  const COMMENT_STATUS = { new: "waiting for the keeper", held: "held for the right moment", sent: "with the build", filed: "filed to the backlog", done: "done", declined: "declined" };
+  const comments = state.comments ?? [];
+  const cStatus = (c) => (COMMENT_STATUS[c.status] ? c.status : "new");
+  const cPrio = (c) => (PRIORITY_RANK[c.priority] ? c.priority : "normal");
+  const commentsOpen = comments
+    .filter((c) => OPEN_COMMENT.has(cStatus(c)))
+    .sort((a, b) => PRIORITY_RANK[cPrio(b)] - PRIORITY_RANK[cPrio(a)] || String(b.at ?? "").localeCompare(String(a.at ?? "")));
+  const commentsClosed = comments
+    .filter((c) => !OPEN_COMMENT.has(cStatus(c)))
+    .sort((a, b) => String(b.statusAt ?? "").localeCompare(String(a.statusAt ?? "")));
+  const prioOptions = (sel) => COMMENT_PRIORITIES.map(([v, label]) => `<option value="${v}"${v === sel ? " selected" : ""}>${label}</option>`).join("");
+  const commentItem = (c) => {
+    const st = cStatus(c);
+    const p = cPrio(c);
+    const open = OPEN_COMMENT.has(st);
+    return `<li class="citem ${p}" data-id="${esc(c.id)}">
+      <div class="chead"><span class="cprio ${p}">${p}</span><span class="cstatus ${st}">${COMMENT_STATUS[st]}</span><span class="cwhen">${esc(c.at ? new Date(c.at).toLocaleString() : "")}</span></div>
+      <p class="ctext">${esc(c.text)}</p>
+      ${c.note ? `<p class="cnote"><span class="qrec-label">Note:</span> ${esc(c.note)}</p>` : ""}
+      ${open && live ? `<label class="cprio-change">Priority <select class="cprio-select" data-id="${esc(c.id)}" data-was="${p}">${prioOptions(p)}</select></label>` : ""}
+    </li>`;
+  };
+  const commentsCardHtml = `
+    <div class="card" id="comments-card">
+      <h2>Comments for the build${commentsOpen.length ? ` &middot; ${commentsOpen.length} open` : ""}</h2>
+      <textarea class="qanswer-input cbox" data-id="__comment__" rows="3" aria-label="Comment for the build" placeholder="A change, an idea, something you noticed&hellip;"${live ? "" : " disabled"}></textarea>
+      <div class="ccompose-row"><label>Priority <select id="comment-priority"${live ? "" : " disabled"}>${prioOptions("normal")}</select></label><button type="button" id="comment-send" class="csend-btn"${live ? "" : " disabled"}>Send</button></div>
+      <p class="chint" id="comment-prio-hint">${esc(COMMENT_HINTS.normal)}</p>
+      ${!live && reason ? `<div class="qhint">Read-only right now &mdash; ${esc(reason)}.</div>` : ""}
+      ${commentsOpen.length ? `<ul class="clist">${commentsOpen.map(commentItem).join("")}</ul>` : ""}
+      ${commentsClosed.length ? `<details class="cclosed"><summary>Handled &middot; ${commentsClosed.length}</summary><ul class="clist">${commentsClosed.map(commentItem).join("")}</ul></details>` : ""}
+    </div>`;
 
   // The tabs, in order; the first is the default. The URL hash (#findings, #questions, …) opens
   // another, and the old #board lands on the Overview.
@@ -636,23 +687,24 @@ export function render(state, ctx = {}) {
   .qsev.green{background:#eaf7ee;border-color:#c9e8d3;color:#1d6b38}
   .sev-dot{display:inline-block;width:8px;height:8px;border-radius:99px;background:var(--line)}
   .sev-dot.red{background:var(--ember)} .sev-dot.amber{background:var(--sun)} .sev-dot.green{background:var(--green)}
-  .qtag{display:inline-block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
-        padding:2px 8px;border-radius:99px;margin-left:8px;vertical-align:middle}
-  .qtag.ratified{background:#eaf7ee;border:1px solid #c9e8d3;color:#1d6b38}
-  .qtag.needs{background:#fff4e2;border:1px solid #ffd79a;color:#8a4b06}
   .qanswer-row{display:flex;gap:8px;margin-top:8px}
   .qanswer-row input[type=text]{flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13.5px}
   .qanswer-row button{padding:7px 14px;border:none;border-radius:6px;background:var(--blue-text);color:#fff;font-weight:600;font-size:13.5px;cursor:pointer}
   .qanswer-row button:disabled,.qanswer-row input:disabled{opacity:.55;cursor:not-allowed}
   .qrec-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0 4px;padding:8px 10px;background:#f2f7fb;border:1px solid #dbe7f1;border-radius:6px}
-  .qrec{flex:1;min-width:200px;margin:0;font-size:13.5px;color:#243546}
+  .qrec-text{flex:1;min-width:200px}
+  .qrec,.qwhy{margin:0;font-size:13.5px;color:#243546}
+  .qwhy{margin-top:3px;font-size:13px;color:#4a5d70}
+  .qrec-missing{margin:6px 0 4px;font-size:13px;font-style:italic;color:#8a6d1a}
   .qrec-label{font-weight:700;color:var(--navy)}
   .qrec-row button{padding:6px 12px;border:1px solid var(--blue-text);border-radius:6px;background:#fff;color:var(--blue-text);font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap}
   .qrec-row button:disabled{opacity:.55;cursor:not-allowed}
-  .qratify-row{margin-top:10px}
-  .qratify-row button{padding:5px 12px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--navy);font-weight:600;font-size:12.5px;cursor:pointer}
-  .qratify-row button.ratified{background:#eaf7ee;border-color:#c9e8d3;color:#1d6b38}
-  .qratify-row button:disabled{opacity:.55;cursor:not-allowed}
+  .qdone-row{display:flex;gap:8px;margin-top:10px}
+  .qdone-row button{padding:5px 12px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--navy);font-weight:600;font-size:12.5px;cursor:pointer}
+  .qdone-row button.qconfirm-btn{border-color:#c9e8d3;background:#eaf7ee;color:#1d6b38}
+  .qdone-row button:disabled{opacity:.55;cursor:not-allowed}
+  .qanswer-row button.qcancel-btn{background:#fff;color:var(--navy);border:1px solid var(--line)}
+  .qsettled{color:var(--mut);font-size:12.5px;margin:-6px 2px 18px}
   .qhint{font-size:12px;color:var(--mut);margin-top:6px;font-style:italic}
   .qhint code{background:#eaf1f7;padding:1px 5px;border-radius:4px;color:var(--navy)}
   .qanswered{background:#f8fafc}
@@ -663,6 +715,24 @@ export function render(state, ctx = {}) {
   footer{color:var(--mut);font-size:12px;margin-top:26px;text-align:center}
   .draft-banner{border-left:4px solid var(--sun);background:#fffaf0;font-size:13.5px}
   .qquote{margin:4px 0;padding:4px 10px;border-left:3px solid var(--line);color:#243546;font-size:13px}
+  .cbox{display:block;width:100%;resize:vertical;min-height:64px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13.5px}
+  .ccompose-row{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-top:8px;font-size:13px;color:var(--mut)}
+  .ccompose-row select,.cprio-change select{font:inherit;font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink);margin-left:4px}
+  .csend-btn{padding:7px 16px;border:none;border-radius:6px;background:var(--blue-text);color:#fff;font-weight:600;font-size:13.5px;cursor:pointer}
+  .cbox:disabled,.ccompose-row select:disabled,.csend-btn:disabled{opacity:.55;cursor:not-allowed}
+  .chint{font-size:12px;color:var(--mut);margin:6px 0 0}
+  .clist{list-style:none;margin:12px 0 0;padding:0}
+  .citem{border:1px solid var(--line);border-left:4px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+  .citem.urgent{border-left-color:var(--ember)} .citem.high{border-left-color:var(--sun)} .citem.normal{border-left-color:var(--blue)}
+  .chead{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px}
+  .cprio{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:2px 8px;border-radius:99px;border:1px solid var(--line);background:#f2f5f8;color:#3d4f63}
+  .cprio.urgent{background:#fde9db;border-color:#f7c9a3;color:#8a3c06} .cprio.high{background:#fff4e2;border-color:#ffd79a;color:#6b4708} .cprio.normal{background:#e8f3fb;border-color:#c4e0f3;color:#0A5A92}
+  .cstatus{font-weight:600;color:var(--navy)} .cstatus.declined{color:var(--ember-text)} .cstatus.done,.cstatus.filed{color:#1d6b38}
+  .cwhen{color:var(--mut);margin-left:auto}
+  .ctext{margin:5px 0 2px;font-size:13.5px;white-space:pre-wrap;overflow-wrap:anywhere}
+  .cnote{margin:3px 0 0;font-size:12.5px;color:#4a5d70}
+  .cprio-change{display:inline-block;margin-top:4px;font-size:12px;color:var(--mut)}
+  .cclosed{margin-top:10px} .cclosed summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--navy)}
 </style></head><body><div class="wrap">
 ${freshnessHtml}<header><h1>${esc(title)}</h1>${state.phase ? `<span class="phase">${esc(state.phase)}</span>` : ""}</header>
 <div class="meta">${metaBits.join(" &middot; ")}</div>
@@ -686,6 +756,7 @@ ${state.extra && state.extra.draft ? `<div class="card draft-banner"><strong>Unc
     </div>
   </div>
   <div>
+    ${commentsCardHtml}
     <div class="card">
       <h2>Latest findings, newest first${findingsToday ? ` &middot; ${findingsToday} today` : ""}</h2>
       ${latestFindingsHtml}
@@ -800,15 +871,105 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
     });
   });
 
-  document.querySelectorAll(".qratify-btn").forEach(function(btn){
+  // Confirm hides an answered question for good. Edit opens its answer in place; Save posts it
+  // like any answer, and Cancel closes it and drops the draft.
+  document.querySelectorAll(".qconfirm-btn").forEach(function(btn){
     btn.addEventListener("click", function(){
       if (btn.disabled) return;
-      var id = btn.getAttribute("data-id");
-      var wasRatified = btn.getAttribute("data-ratified") === "true";
       btn.disabled = true;
       var prevLabel = btn.textContent;
-      btn.textContent = wasRatified ? "Un-ratifying…" : "Ratifying…";
-      postPatch({ id: id, ratified: !wasRatified }, btn, prevLabel);
+      btn.textContent = "Confirming…";
+      postPatch({ id: btn.getAttribute("data-id"), confirmed: true }, btn, prevLabel);
+    });
+  });
+  function editRow(id){
+    var row = null;
+    document.querySelectorAll(".qedit-row").forEach(function(el){ if (el.getAttribute("data-id") === id) row = el; });
+    return row;
+  }
+  document.querySelectorAll(".qedit-btn").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var row = btn.disabled ? null : editRow(btn.getAttribute("data-id"));
+      if (!row) return;
+      var input = row.querySelector(".qanswer-input");
+      row.hidden = false;
+      if (!input.value) input.value = btn.getAttribute("data-answer") || "";
+      input.focus();
+      input.select();
+    });
+  });
+  document.querySelectorAll(".qcancel-btn").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var id = btn.getAttribute("data-id");
+      var row = editRow(id);
+      if (!row) return;
+      row.querySelector(".qanswer-input").value = "";
+      row.hidden = true;
+      var drafts = readJson("sessionStorage", DKEY) || {};
+      delete drafts[id];
+      writeJson("sessionStorage", DKEY, drafts);
+    });
+  });
+
+  // --- Comments: Send posts the box and its priority; changing an open comment's priority posts at
+  // once. The chosen priority rides out a refresh with the draft (sessionStorage).
+  var CPRIO_HINTS = ${JSON.stringify(COMMENT_HINTS).replace(/</g, "\\u003c")};
+  var PKEY = STORE + ":comment-priority";
+  var cbox = document.querySelector(".cbox");
+  var cprio = document.getElementById("comment-priority");
+  var csend = document.getElementById("comment-send");
+  var chint = document.getElementById("comment-prio-hint");
+  function postComment(body, onFail, onOk){
+    savesInFlight++;
+    fetch("/comment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function(r){
+      if (!r.ok) return r.json().catch(function(){ return {}; }).then(function(j){ throw new Error(j.error || ("send failed (" + r.status + ")")); });
+      if (onOk) onOk();
+      location.reload();
+    }).catch(function(err){
+      savesInFlight--;
+      if (onFail) onFail();
+      alert("Could not send: " + err.message);
+    });
+  }
+  if (cprio) {
+    var savedPrio = readJson("sessionStorage", PKEY);
+    if (typeof savedPrio === "string" && CPRIO_HINTS[savedPrio] && !cprio.disabled) cprio.value = savedPrio;
+    var showPrioHint = function(){ if (chint) chint.textContent = CPRIO_HINTS[cprio.value] || ""; };
+    showPrioHint();
+    cprio.addEventListener("change", function(){ writeJson("sessionStorage", PKEY, cprio.value); showPrioHint(); });
+  }
+  function sendComment(){
+    if (!csend || csend.disabled || !cbox) return;
+    var text = (cbox.value || "").trim();
+    if (!text) { cbox.focus(); return; }
+    csend.disabled = true;
+    var prevLabel = csend.textContent;
+    csend.textContent = "Sending…";
+    postComment({ text: text, priority: cprio ? cprio.value : "normal" }, function(){
+      csend.disabled = false;
+      csend.textContent = prevLabel;
+    }, function(){
+      var drafts = readJson("sessionStorage", DKEY) || {};
+      delete drafts["__comment__"];
+      writeJson("sessionStorage", DKEY, drafts);
+      writeJson("sessionStorage", PKEY, "normal");
+    });
+  }
+  if (csend) csend.addEventListener("click", sendComment);
+  if (cbox) cbox.addEventListener("keydown", function(e){
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendComment(); }
+  });
+  document.querySelectorAll(".cprio-select").forEach(function(sel){
+    sel.addEventListener("change", function(){
+      sel.disabled = true;
+      postComment({ id: sel.getAttribute("data-id"), priority: sel.value }, function(){
+        sel.disabled = false;
+        sel.value = sel.getAttribute("data-was");
+      });
     });
   });
 
@@ -1105,7 +1266,7 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
     for (var i = 0; i < inputs.length; i++) { if (inputs[i].value && inputs[i].value.length) return true; }
     return false;
   }
-  // Held off only while there's something to lose right now: a save/ratify POST in flight, or a
+  // Held off only while there's something to lose right now: a save/confirm POST in flight, or a
   // focused or dirty answer or an open dialog touched in the last minute. Never by which tab is
   // open — the tab rides in the hash, so the reload lands back on Questions like any other tab.
   // Unsaved drafts are mirrored to sessionStorage and restored after the
@@ -1130,7 +1291,11 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
     Object.keys(drafts).forEach(function(id){
       var input = null;
       document.querySelectorAll(".qanswer-input").forEach(function(el){ if (el.getAttribute("data-id") === id) input = el; });
-      if (input && !input.disabled) input.value = drafts[id]; else delete drafts[id];
+      if (input && !input.disabled) {
+        input.value = drafts[id];
+        var row = input.closest ? input.closest(".qedit-row") : null;
+        if (row) row.hidden = false;
+      } else delete drafts[id];
     });
     writeJson("sessionStorage", DKEY, drafts);
   })();

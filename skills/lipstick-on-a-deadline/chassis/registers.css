@@ -1,0 +1,64 @@
+/* ============ registers: surface, texture, type treatment. Built from brand tokens so light and dark both hold. ============ */
+
+/* plain-light: the brand as it is; quiet cards; sans display */
+html[data-register="plain-light"]{ --c-card-shadow:0 1px 0 var(--c-line-2); }
+
+/* paper-ink: warm paper and ink; a serif display; hairline rules; a faint fibre texture */
+html[data-register="paper-ink"]{
+  --c-bg:color-mix(in oklab,var(--bg) 90%,#e9dcc0);
+  --c-panel:color-mix(in oklab,var(--panel,var(--bg)) 88%,#f3e9d2);
+  --c-card-bg:color-mix(in oklab,var(--panel,var(--bg)) 84%,#efe2c6);
+  --c-card-line:color-mix(in oklab,var(--line) 70%,#b9a37a);
+  --c-display:"Iowan Old Style","Charter","Palatino Linotype",Palatino,Georgia,var(--serif,serif);
+  --c-display-weight:600; --c-display-track:-0.012em;
+  --c-texture:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.3 0 0 0 0 0.2 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+html[data-register="paper-ink"][data-theme="dark"]{
+  --c-bg:color-mix(in oklab,var(--bg) 92%,#2a2317); --c-panel:color-mix(in oklab,var(--panel,var(--bg)) 90%,#30281a);
+  --c-card-bg:color-mix(in oklab,var(--panel,var(--bg)) 88%,#342b1c); --c-card-line:color-mix(in oklab,var(--line) 70%,#6b5a3b);
+}
+html[data-register="paper-ink"] .card,html[data-register="paper-ink"] .a-split .after{ border-radius:6px; }
+html[data-register="paper-ink"] .scene + .scene{ border-top:1px dashed var(--c-card-line); }
+
+/* blueprint: a drafting grid, mono labels, accent-tinted surfaces */
+html[data-register="blueprint"]{
+  --c-bg:color-mix(in oklab,var(--bg) 90%,var(--accent));
+  --c-panel:color-mix(in oklab,var(--panel,var(--bg)) 92%,var(--accent));
+  --c-card-bg:color-mix(in oklab,var(--panel,var(--bg)) 86%,var(--accent));
+  --c-card-line:color-mix(in oklab,var(--accent) 45%,var(--line));
+  --c-display-weight:600; --c-display-track:-0.01em;
+  --c-texture:linear-gradient(color-mix(in oklab,var(--accent) 12%,transparent) 1px,transparent 1px),
+              linear-gradient(90deg,color-mix(in oklab,var(--accent) 12%,transparent) 1px,transparent 1px);
+}
+html[data-register="blueprint"] body{ background-size:28px 28px; }
+html[data-register="blueprint"] .kicker,html[data-register="blueprint"] .h3{ font-family:var(--c-mono); }
+html[data-register="blueprint"] .card{ border-radius:4px; border-style:solid; }
+
+/* night-ink: deep ink surfaces in both themes; the accent carries the light */
+html[data-register="night-ink"]{
+  --c-bg:color-mix(in oklab,#0b1220 88%,var(--accent)); --c-panel:color-mix(in oklab,#101a2c 90%,var(--accent));
+  --c-card-bg:color-mix(in oklab,#121d31 90%,var(--accent)); --c-card-line:color-mix(in oklab,#2a3a57 80%,var(--accent));
+  --c-text:#eef2f8; --c-text-2:#c3cbda; --c-muted:#8f9bb2; --c-line:#26324a; --c-line-2:#1c2740;
+  --c-accent-ink:color-mix(in oklab,var(--accent) 60%,#ffffff);
+  color-scheme:dark;
+}
+html[data-register="night-ink"] .a-chapter{ background:color-mix(in oklab,var(--accent) 22%,#0b1220); color:#eef2f8; }
+html[data-register="night-ink"] .a-chapter .h2,html[data-register="night-ink"] .a-chapter .h3{ color:#fff; }
+html[data-register="night-ink"] .a-chapter .body,html[data-register="night-ink"] .a-chapter li{ color:#c9d2e2; }
+
+/* dark-glass: glass cards over soft accent glows; dark in both themes */
+html[data-register="dark-glass"]{
+  --c-bg:#070a12; --c-panel:rgba(255,255,255,0.045); --c-panel-2:rgba(255,255,255,0.03);
+  --c-card-bg:rgba(255,255,255,0.055); --c-card-line:rgba(255,255,255,0.11); --c-card-blur:blur(14px) saturate(1.3);
+  --c-card-shadow:0 24px 70px rgba(0,0,0,0.45);
+  --c-text:#eef1f8; --c-text-2:#c2c8d8; --c-muted:#8d95ab; --c-line:rgba(255,255,255,0.1); --c-line-2:rgba(255,255,255,0.07);
+  --c-accent-ink:color-mix(in oklab,var(--accent) 55%,#ffffff);
+  --c-texture:radial-gradient(60vw 50vh at 85% 8%,color-mix(in oklab,var(--accent) 18%,transparent),transparent 70%),
+              radial-gradient(50vw 40vh at 5% 60%,color-mix(in oklab,var(--accent) 10%,transparent),transparent 70%);
+  color-scheme:dark;
+}
+html[data-register="dark-glass"] body{ background-attachment:fixed; }
+html[data-register="dark-glass"] .a-chapter{ background:rgba(255,255,255,0.04); color:#eef1f8; }
+html[data-register="dark-glass"] .a-chapter .h2,html[data-register="dark-glass"] .a-chapter .h3{ color:#fff; }
+html[data-register="dark-glass"] .a-chapter .body,html[data-register="dark-glass"] .a-chapter li{ color:#c9cfdd; }
+html[data-register="dark-glass"] .mast,html[data-register="night-ink"] .mast{ background:color-mix(in oklab,var(--c-bg) 86%,transparent); }

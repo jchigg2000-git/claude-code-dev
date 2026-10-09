@@ -54,7 +54,7 @@ export async function collectAnswers(co) {
       const version = versionOf(q);
       const hit = byVersion.get(`${q.id}:${version}`);
       if (hit) hit.checkouts.push(wt);
-      else byVersion.set(`${q.id}:${version}`, { qid: String(q.id), question: q.question ?? "", severity: q.severity ?? "", answer: String(q.answer), answeredAt: q.answeredAt ?? null, answeredVia: q.answeredVia ?? null, answerQuote: q.answerQuote ?? null, ratified: Boolean(q.ratified), version, checkouts: [wt] });
+      else byVersion.set(`${q.id}:${version}`, { qid: String(q.id), question: q.question ?? "", severity: q.severity ?? "", answer: String(q.answer), answeredAt: q.answeredAt ?? null, answeredVia: q.answeredVia ?? null, answerQuote: q.answerQuote ?? null, edited: Boolean(q.editedAt), settled: Boolean(q.confirmed || q.ratified || q.actedAt), version, checkouts: [wt] });
     }
   }
   return [...byVersion.values()].sort((a, b) => (ms(a.answeredAt) ?? 0) - (ms(b.answeredAt) ?? 0));
@@ -83,10 +83,10 @@ export function formatBlock(co, items, { updated = new Set() } = {}) {
   const lines = [`build-status: the state file records ${items.length} new answer${items.length === 1 ? "" : "s"} in ${repo}.`];
   for (const item of shown) {
     lines.push(`- ${item.qid}${item.severity ? ` (${item.severity})` : ""}${updated.has(item.qid) ? " [updated]" : ""} "${item.question}" — ${where(item)}`);
-    lines.push(`  Recorded answer (${via(item)}, ${hhmm(item.answeredAt)}, ${item.ratified ? "ratified" : "not ratified"}): "${clip(item.answer)}"`);
+    lines.push(`  Recorded answer (${via(item)}${item.edited ? ", edited" : ""}, ${hhmm(item.answeredAt)}): "${clip(item.answer)}"`);
   }
   if (items.length > shown.length) lines.push(`and ${items.length - shown.length} more: run build-status answers --new`);
-  lines.push("Quoted from the file, not confirmed in this chat. Act on it per your repo's rules.");
+  lines.push("Quoted from the file, not said in this chat. Act on it now, per your repo's rules: it needs no confirming first. Once it's done, build-status acted <id> --note '<what was done>' lets the page hide it.");
   lines.push("Context for this session's own next step — not a new task for any agent it is running.");
   return lines.join("\n");
 }
@@ -186,7 +186,7 @@ export async function answersCommand(co, loc, { onlyNew = false, json = false } 
   const items = (await collectAnswers(co)).reverse().slice(0, 20);
   if (json) console.log(JSON.stringify(items, null, 2));
   else if (!items.length) console.log("no answered questions");
-  else for (const i of items) console.log(`${i.answeredAt ?? "?"}  ${i.qid}  (${via(i)}${i.ratified ? ", ratified" : ""})  "${i.answer}"`);
+  else for (const i of items) console.log(`${i.answeredAt ?? "?"}  ${i.qid}  (${via(i)}${i.edited ? ", edited" : ""}${i.settled ? ", settled" : ""})  "${i.answer}"`);
   return 0;
 }
 
@@ -210,7 +210,7 @@ export async function awaitAnswer(co, loc, qid, timeoutMs) {
     }
   };
   const report = (q) => {
-    const item = { qid: String(q.id), question: q.question ?? "", severity: q.severity ?? "", answer: String(q.answer), answeredAt: q.answeredAt, answeredVia: q.answeredVia, ratified: Boolean(q.ratified), version: versionOf(q), checkouts: [co.root] };
+    const item = { qid: String(q.id), question: q.question ?? "", severity: q.severity ?? "", answer: String(q.answer), answeredAt: q.answeredAt, answeredVia: q.answeredVia, edited: Boolean(q.editedAt), settled: Boolean(q.confirmed || q.ratified || q.actedAt), version: versionOf(q), checkouts: [co.root] };
     markDelivered(co, [item], process.env.CLAUDE_CODE_SESSION_ID, null);
     console.log(formatBlock(co, [item]));
   };

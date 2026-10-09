@@ -37,7 +37,7 @@ Natural-language equivalents ("ship it", "ship this", "ship and merge", "ship to
    - `git rev-parse HEAD`
 2. `phase:decide` — match exactly one decision-table row below and print it.
 3. `phase:hygiene` — run `python3 <skill-dir>/hygiene-check.py --root <repo-root>`. Exit 0 = continue. Exit 1 = stop-clean, surfacing the script's full output (the failures are listed there with an auto-fix command for env drift). Skipped if `--skip-hygiene`. Read-only; the auto-fix is never invoked automatically.
-4. `phase:sysdoc-gate` — run `python3 <skill-dir>/sysdoc-gate.py --root <repo-root>`. Exit 0 = continue silently. Exit 1 = the change is structural (rules R6 or R7 fired); invoke `/gen-sys-doc --no-pdf` to regenerate `docs/architecture/system-design.md`. Any regen output becomes part of the dirty state for `phase:commit` to pick up. On `--dry-run`, run the detector but DO NOT invoke gen-sys-doc — just report what would happen. Skipped if `--skip-sysdoc-gate`. Rule set is R6 (≥2 new non-test, non-shadcn source files) + R7 (migrations/schema changes); see **Sibling scripts** below.
+4. `phase:sysdoc-gate` — run `python3 <skill-dir>/sysdoc-gate.py --root <repo-root>`. Exit 0 = continue silently. Exit 1 = the change is structural (rules R6 or R7 fired); invoke `/gen-sys-doc --no-pdf` to regenerate `docs/system-design.md`. Any regen output becomes part of the dirty state for `phase:commit` to pick up. On `--dry-run`, run the detector but DO NOT invoke gen-sys-doc — just report what would happen. Skipped if `--skip-sysdoc-gate`. Rule set is R6 (≥2 new non-test, non-shadcn source files) + R7 (migrations/schema changes); see **Sibling scripts** below.
 5. `phase:commit` — only if dirty. Skipped silently otherwise.
 6. `phase:push-feature` — `git push -u origin HEAD`.
 7. `phase:merge` — see "Merge to main" below.
@@ -87,7 +87,7 @@ When committing dirty state:
   - `refactor:` if additions ≈ deletions across existing files.
   - `chore:` otherwise.
 - Subject ≤ 72 chars. Body ≤ 8 lines.
-- Last line: `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>`.
+- Last line: `Co-Authored-By: Claude <noreply@anthropic.com>`.
 - Strip any token matching `sk-…`, `ghp_…`, `gho_…`, `xox[bpa]-…`, `AKIA…`, or `-----BEGIN` from the message before committing.
 
 ## Stop-clean procedure (the only error path)

@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 
 const KNOWN = new Set([
   "repo", "phase", "serverPort", "history", "updated", "steps", "gates", "gate",
-  "measures", "findings", "note", "questions",
+  "measures", "findings", "note", "questions", "comments",
 ]);
 
 export function gateOk(status) {
@@ -53,6 +53,7 @@ export function normalize(raw) {
       typeof f === "string" ? { id: plainFindingId(f), summary: f, plain: true } : f && typeof f === "object" ? f : null,
     ).filter(Boolean),
     questions: arr(s.questions).filter((q) => q && typeof q === "object"),
+    comments: arr(s.comments).filter((c) => c && typeof c === "object" && typeof c.text === "string"),
     extra,
   };
 }

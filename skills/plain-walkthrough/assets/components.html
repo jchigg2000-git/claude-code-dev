@@ -1,0 +1,92 @@
+<!--
+  Building blocks for a plain-walkthrough page. Paste into {{BODY}} of chassis.html.
+  Every class used here is defined in the chassis. Do not add a second <style> block;
+  if you need a rule the chassis lacks, add it to the page's copy of the chassis style.
+
+  Figure rules
+  - viewBox width 960; height as needed (300-460). Text at 16px or more (classes t, s, nm, h, tag).
+  - Solid box (.bx) = something stated or known. Dashed box (.bx.dash) = a guess.
+    Filled box (.bx.on) = the part that did work in this step. Grey outline (.bx.off) = idle.
+  - Arrows: class "ar" (accent), "arm" (muted), "art" (text colour), "arb" (red, dashed: refused).
+    They use the markers defined once in the chassis (#ah, #ahm, #aht, #ahb).
+  - At most ~12 labelled things per figure. One idea per figure.
+  - The aria-label on the region and on the svg says, in one or two plain sentences,
+    what the figure shows. It is the same text in both places.
+-->
+
+<!-- ============ Contents (optional; use when there are 6+ sections) ============ -->
+<ol class="toc">
+  <li><a href="#s1"><b>1</b>A first letter arrives</a></li>
+  <li><a href="#s2"><b>2</b>A second letter disagrees</a></li>
+  <li><a href="#words"><b>G</b>Words used on this page</a></li>
+</ol>
+
+<!-- ============ What goes in and what comes out ============ -->
+<section class="sec" id="start" style="padding-top:24px">
+  <h2>What goes in and what comes out</h2>
+  <figure class="fig"><div class="fig-scroll" tabindex="0" role="region" aria-label="Three kinds of input go into one box. Out come two things: a finished list and a set of questions for a person."><svg class="dg" viewBox="0 0 960 300" role="img" aria-label="Three kinds of input go into one box. Out come two things: a finished list and a set of questions for a person.">
+    <rect x="0" y="30" width="240" height="56" class="bx line"/><text x="120" y="64" class="t b" text-anchor="middle">A letter</text>
+    <rect x="0" y="120" width="240" height="56" class="bx line"/><text x="120" y="154" class="t b" text-anchor="middle">A form</text>
+    <rect x="0" y="210" width="240" height="56" class="bx line"/><text x="120" y="244" class="t b" text-anchor="middle">A person's answer</text>
+    <path d="M244 58L326 130" class="ar"/><path d="M244 148L326 148" class="ar"/><path d="M244 238L326 166" class="ar"/>
+    <rect x="330" y="50" width="300" height="200" class="bx thick"/>
+    <text x="480" y="140" class="h" text-anchor="middle">THE SYSTEM</text>
+    <text x="480" y="170" class="s" text-anchor="middle">works only when something arrives</text>
+    <path d="M634 110L716 80" class="ar"/><path d="M634 190L716 220" class="ar"/>
+    <rect x="720" y="50" width="240" height="60" class="bx"/><text x="840" y="86" class="t b" text-anchor="middle">A finished list</text>
+    <rect x="720" y="190" width="240" height="60" class="bx dash"/><text x="840" y="226" class="t b" text-anchor="middle">Questions for you</text>
+  </svg></div><figcaption><b>Look at:</b> everything goes into the same box. Two things come out.</figcaption></figure>
+  <p style="margin-top:18px">Two or three sentences in everyday words. Say what a person puts in, and what they get back.</p>
+</section>
+
+<!-- ============ One step ============ -->
+<section class="sec" id="s1">
+  <div class="sh"><span class="sn">1</span><h2>A first letter arrives</h2></div>
+  <p class="sub">One line that sets the scene: what happens to the running example in this step.</p>
+  <figure class="fig"><div class="fig-scroll" tabindex="0" role="region" aria-label="ONE PLAIN SENTENCE: what the figure shows."><svg class="dg" viewBox="0 0 960 320" role="img" aria-label="ONE PLAIN SENTENCE: what the figure shows.">
+    <!-- one idea, drawn with the classes above -->
+  </svg></div><div class="strip">
+    <div class="cell kept"><h4>What came in</h4><ul><li>the letter, kept exactly as it arrived</li></ul></div>
+    <div class="cell rebuilt"><h4>What changed</h4><ul><li>the list now has three names on it</li></ul></div>
+    <div class="cell asked"><h4>What happens next</h4><ul><li>it asks: "Is Sam on the Leeds team?"</li></ul></div>
+  </div><figcaption><b>Look at:</b> the one thing in the figure the reader should notice first, and why.</figcaption></figure>
+  <p style="margin-top:18px">At most 150 words across all paragraphs in the step. Introduce at most one new idea.
+  When a word needs defining, mark it once with <dfn>fingerprint</dfn> and explain it in the same sentence.</p>
+</section>
+
+<!-- ============ Naming the comparison (after the reader has seen it happen) ============ -->
+<section class="sec" id="like">
+  <div class="sh"><span class="sn">★</span><h2>It works like a ledger</h2></div>
+  <p>Point back at the steps where the reader already saw this happen. Then name the comparison.</p>
+  <div class="tscroll"><table class="tb">
+    <thead><tr><th>A ledger</th><th>This system</th></tr></thead>
+    <tbody>
+      <tr><td>A new line</td><td>Something new arrives (steps 1 and 3)</td></tr>
+      <tr><td>The monthly report</td><td>The list, rebuilt from every line</td></tr>
+    </tbody>
+  </table></div>
+  <div class="stops"><h4>Where the comparison stops</h4><ol>
+    <li>At most three points where the everyday thing and the system differ.</li>
+  </ol></div>
+</section>
+
+<!-- ============ What is real here ============ -->
+<section class="sec" id="real">
+  <h2>What is real here</h2>
+  <div class="box"><ul>
+    <li>What was actually run or tested to make this page, in plain words.</li>
+    <li>Where each number on the page came from (the system printed it).</li>
+    <li>What was simplified or left out, so a reader knows the page is a sketch.</li>
+  </ul></div>
+</section>
+
+<!-- ============ Glossary (at most 8 words) ============ -->
+<section class="sec" id="words">
+  <div class="sh"><span class="sn">G</span><h2>Words used on this page</h2></div>
+  <div class="tscroll"><table class="tb">
+    <thead><tr><th>Word</th><th>What it means here</th><th>First seen</th></tr></thead>
+    <tbody>
+      <tr><td>fingerprint</td><td>A short code worked out from a file's exact contents. The same file always gives the same code.</td><td>step 1</td></tr>
+    </tbody>
+  </table></div>
+</section>

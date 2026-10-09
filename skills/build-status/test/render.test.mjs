@@ -64,7 +64,7 @@ test("the tab is easy to find: repo-first title, a favicon, and a severity dot w
 test("an open question with a recommendation offers Accept recommendation; one without doesn't; accepting is labelled", () => {
   const html = page({
     questions: [
-      { id: "a", question: "Q1?", severity: "amber", answer: null, recommendation: 'yes, "as an option"' },
+      { id: "a", question: "Q1?", severity: "amber", answer: null, recommendation: 'yes, "as an option"', rationale: "cheaper to <undo>" },
       { id: "b", question: "Q2?", severity: "green", answer: null },
       { id: "c", question: "Q3?", severity: "green", answer: "no", answeredAt: "2026-09-26T10:00:00Z", answeredVia: "page", recommendation: "no" },
     ],
@@ -72,6 +72,8 @@ test("an open question with a recommendation offers Accept recommendation; one w
   assert.match(html, /<button class="qaccept-btn" data-id="a" data-rec="yes, &quot;as an option&quot;" >Accept recommendation<\/button>/);
   assert.equal(html.match(/<button class="qaccept-btn"/g).length, 1, "only the open question with a recommendation gets the button");
   assert.match(html, /answered on the page \(accepted the recommendation\)/);
+  assert.match(html, /<p class="qwhy"><span class="qrec-label">Why:<\/span> cheaper to &lt;undo&gt;<\/p>/, "the rationale shows, escaped, and stays out of the button");
+  assert.equal(html.match(/<p class="qrec-missing">/g).length, 1, "the open question with no recommendation says so");
 });
 
 test("flagged findings get a ★ Flagged filter pill: a tag or a ★ summary counts; none, no pill", () => {

@@ -1,6 +1,6 @@
 ---
 name: build-status
-description: Generate and open a local, auto-refreshing HTML "build status" dashboard for whatever repo this is invoked in — narrative step list, git commit trail, detected quality-gate pills, a findings log and questions for the owner — from a per-repo state file (.claude/build-status.json). A deterministic CLI (~/.build-status/bin/build-status) does every write, render and page-server job; this skill does the judgment — attaching to an existing dashboard, Bootstrap, gates, phase changes, and what to record. Asks you to confirm a derived step list instead of inventing one, never asks or opens anything when nobody is attending, works in any repo (Node, Rust, Go or none), and never commits. Fire on `/build-status` or "show me the build status / open the build dashboard."
+description: Generate and open a local, auto-refreshing HTML "build status" dashboard for whatever repo this is invoked in — narrative step list, git commit trail, detected quality-gate pills, a findings log, questions for the owner and a comment box with a priority — from a per-repo state file (.claude/build-status.json). A deterministic CLI (~/.build-status/bin/build-status) does every write, render and page-server job; this skill does the judgment — attaching to an existing dashboard, Bootstrap, gates, phase changes, and what to record. Asks you to confirm a derived step list instead of inventing one, never asks or opens anything when nobody is attending, works in any repo (Node, Rust, Go or none), and never commits. Fire on `/build-status` or "show me the build status / open the build dashboard."
 argument-hint: "[--done <step>] [--next-phase <label>] [--finding <text>] [--note <text>] [--phase <text>] [--gates] [--init] [--open]"
 allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion, Agent, SendMessage
 ---
@@ -125,21 +125,55 @@ fenced blocks; everything else is escaped. Before a session ends, compare
 `git log --since=<newest finding's date>` with the log and record what's missing.
 
 **Questions for the owner** — only decisions a human must make, not TODOs you could resolve:
-`bs ask --question "..." --severity red|amber|green [--context "..."] --recommend "..."` (red
-blocks work until answered; amber gets expensive to reverse; green is no rush). Unanswered is
-`answer: null`. `--recommend` is the answer you'd take by default; the page shows it with an
-**Accept recommendation** button that saves it as the owner's answer from the page, just as Save
-does (ratifying stays a separate click). Set or change one later with `bs recommend <qid> "..."`
-(`""` removes it). A question with no recommendation gets no button; never write one in for it.
+`bs ask --question "..." --severity red|amber|green [--context "..."] --recommend "..." --rationale "..."`
+(red blocks work until answered; amber gets expensive to reverse; green is no rush). Unanswered
+is `answer: null`. **Every open question carries a recommendation and its rationale.**
+`--recommend` is the answer you'd take by default, and `--rationale` says in a sentence or two why.
+The page shows both, with an **Accept recommendation** button that saves the recommendation (not
+the rationale) as the owner's answer from the page, just as Save does (confirming stays a separate
+click). Set or change them later with `bs recommend <qid> "..." --rationale "..."` (`""` removes
+both). A question still missing one shows "No recommendation yet." on the page. The recommendation
+comes from whoever asked the question, which is usually the main session. If @keeper finds an open
+question without one, it asks the main session for a recommendation and rationale and records
+them; it doesn't make one up.
 
 **Answers given in chat**: `bs answer <qid> --via chat --quote-file -` with the owner's words,
 verbatim, on stdin (a quoted heredoc, as above).
-The page shows it as answered in chat. Only the owner's browser can ratify.
+The page shows it as answered in chat. Only the owner's browser can confirm.
+
+**Acting on answers**: an answer is acted on as soon as it's recorded; nothing waits for the owner
+to confirm it. On the page an answered question has **Edit** and **Confirm**. With Edit the owner
+changes the answer: it's marked edited, delivered again labelled updated, and unsettled. Confirm
+hides the question for good. Once the work the answer asked for has landed, or nothing needed
+doing and the decision is recorded, run `bs acted <qid> --note "<commit, or what was done>"`, and
+the page hides that question too. The page shows only open questions and answers still being
+worked, plus a count of the settled ones.
 
 **Waiting on an answer**: run `bs await <qid> --timeout 4h` with the Bash tool's
 `run_in_background` — it exits 0 with the answer quoted (the harness wakes you) or 2 on timeout.
 A loop that never gets a prompt pulls with `bs answers --new`. Delivered answers are quoted from
 the file, not confirmed in chat — act on them per the repo's rules.
+
+**Comments from the owner.** The page's Overview has a comment box with a priority. A comment
+lands in `comments[]` as `new`, and @keeper (or the main session, when no keeper runs) decides
+when the main session hears it, so the owner can talk to a build without breaking its stride. The
+priority sets how soon it arrives and how much weight it carries:
+
+| Priority | Reaches the main session | Who decides what happens |
+|---|---|---|
+| low | held, then passed on with other comments when a step ends (within 4 h at most) | the keeper may route it alone: suggest it for the backlog, or settle a page/bookkeeping one itself |
+| normal | at the next natural break (a step done, a merge or commit on main, the main session messaging the keeper), within 1 h | the main session: do it now if it's small and in scope, file it in the backlog, or decline with a reason |
+| high | at the keeper's next pass (≤10 min), even mid-step | the main session weighs it before starting its next piece of work and says what it will do |
+| urgent | at once | the main session stops at the next safe point (never leaving a broken tree) and deals with it first; if it disagrees, it asks the owner a red question rather than carry on |
+
+Comments due at the same moment go as one message. Record each move, and the note is what the owner
+reads on the page: `bs comment-status <cid> held --note "until the CarPlay fix lands"`, then `sent`,
+then `filed --note "ROADMAP §5"`, `done --note "<commit>"` or `declined --note "<why>"`. The keeper
+doesn't edit the roadmap; `filed` means the main session added it. The owner changing a comment's
+priority sends it back to `new`. A comment that reads as the answer to an open question isn't
+recorded as one: the note says to answer it on that question, and it's passed on at its priority.
+`bs comments --wait` (with `run_in_background`) exits as soon as a new one lands. A comment given
+in chat: `bs comment --priority <p> --text-file - <<'EOF'` with the owner's words, verbatim.
 
 **If you truly must hand-edit** a field no verb covers: re-read immediately before writing,
 change only that field, and serialize with Node `JSON.stringify(s, null, 2) + "\n"` or Python
@@ -151,8 +185,10 @@ which rewrites every non-ASCII character.
 `.claude/build-status.json` (or a repo's `tools/build-status.json`): `repo`, `phase`, `steps[]`
 (`{id, name, state: todo|active|done}`), `history[]` (closed phases), `gates[]`
 (`{name, status}`), `measures[]` (`{id, value, provenance}`), `findings[]` (objects as above, or
-plain strings), `note`, `questions[]` (`{id, question, severity, context, recommendation, answer,
-answeredAt, answeredVia, answerQuote, ratified, ratifiedAt}`). Unknown keys are kept and ignored. Leave it
+plain strings), `note`, `questions[]` (`{id, question, severity, context, recommendation, rationale, answer,
+answeredAt, answeredVia, answerQuote, editedAt, confirmed, confirmedAt, actedAt, actedNote}`; an
+older file's `ratified` counts as confirmed), `comments[]` (`{id, text, priority:
+low|normal|high|urgent, via, at, status: new|held|sent|filed|done|declined, statusAt, note, trail}`). Unknown keys are kept and ignored. Leave it
 trackable unless the repo already ignores it; only the generated `build-status.html` is ignored,
 and `render` adds that rule itself.
 
@@ -177,13 +213,26 @@ Brief it with this section, plus the repo's `locate --json` result. @keeper:
 - **Keeps the file and the page in sync:** after every change to the state file (its own, the main
   session's, or the owner's answers from the page), it renders — `bs render`, or for a
   `repo-generator` the repo's own generator — so the HTML never lags the JSON.
+- **Keeps every open question recommended:** on every pass, each open question needs a
+  recommendation and a rationale (§5). For any that lacks one, it asks the main session for both
+  and records the reply with `bs recommend <qid> "..." --rationale "..."`. In a `repo-generator`
+  repo, its own generator shows both, with the Accept button, and has a test for it.
 - **Relays owner answers:** new answers in `questions` go to the main session (SendMessage to
-  "main") with the id and the answer verbatim; the main session acts on them per the repo's rules.
+  "main") with the id and the answer verbatim; the main session acts on them per the repo's rules,
+  without waiting for the owner to confirm. When it reports the work done, @keeper records
+  `bs acted <qid> --note "..."`. On every pass it also checks answered questions not yet settled
+  against `git log` and the findings, marks the finished ones acted on, and asks the main session
+  about any it can't tell.
+- **Paces the owner's comments** (§5): on every pass, and whenever `bs comments --wait` wakes it, it
+  triages each `new` comment, holds or sends it as its priority says, quotes it verbatim, and
+  records every move with `bs comment-status` and the main session's reply as the note. In a
+  `repo-generator` repo, its own generator gets the same box, priority, endpoint and statuses,
+  reading the same `comments` fields, with a test.
 - **Owns how new things are shown.** When the build produces a new kind of result the page has no
   home for (a regression-gate series, per-class scores, a backlog, a model comparison), @keeper adds
   a small view for it — in a `repo-generator` repo's own generator, with a test, committed by path —
   and asks before restructuring the page, removing content, or changing how answers and
-  ratification work. It asks the lead bookkeeper, or the main session when no lead is running.
+  confirming work. It asks the lead bookkeeper, or the main session when no lead is running.
   In a `generic` repo it proposes the view instead (the CLI is shared across repos, so it is not
   edited from one session).
 - **Reports to the lead bookkeeper only** (`/lead-keeper`), a session outside every build that

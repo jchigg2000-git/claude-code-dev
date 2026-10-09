@@ -356,10 +356,9 @@ export function addQuestion(raw, q, { explicitId = false } = {}) {
     severity: q.severity || "amber",
     ...(q.context ? { context: q.context } : {}),
     ...(q.recommendation ? { recommendation: q.recommendation } : {}),
+    ...(q.recommendation && q.rationale ? { rationale: q.rationale } : {}),
     answer: null,
     answeredAt: null,
-    ratified: false,
-    ratifiedAt: null,
     askedAt: localIso(),
   };
   const existing = list.find((x) => String(x.id) === String(question.id));
@@ -378,39 +377,127 @@ function findQuestion(raw, id) {
   return q;
 }
 
+// A question is settled once the owner confirms it or the build has acted on its answer (or, from
+// before Confirm existed, it was ratified). The page hides settled questions.
+export const isSettled = (q) => Boolean(q && q.answer != null && String(q.answer).trim() && (q.confirmed || q.ratified || q.actedAt));
+
 // An answer from the page (`via: "page"`) or recorded from chat (`via: "chat"`, with the owner's
 // words verbatim in `answerQuote`). The same text again is a no-op, so a retried save can't
-// move `answeredAt`.
+// move `answeredAt`. A changed answer (the page's Edit) is marked edited and unsettles the
+// question: the build hasn't acted on the new one yet.
 export function setAnswer(raw, id, { answer, via, quote }) {
   const q = findQuestion(raw, id);
   const text = String(answer ?? "").trim();
   if (!text) throw new Conflict("an answer can't be empty");
   if (q.answer === text && q.answeredVia === via) return { changed: false, id: q.id };
+  const now = localIso();
+  if (q.answer != null && String(q.answer).trim() && q.answer !== text) q.editedAt = now;
+  for (const k of ["confirmed", "confirmedAt", "actedAt", "actedNote", "ratified", "ratifiedAt"]) delete q[k];
   q.answer = text;
-  q.answeredAt = localIso();
+  q.answeredAt = now;
   if (via) q.answeredVia = via;
   if (quote !== undefined) q.answerQuote = quote;
   else delete q.answerQuote;
   return { changed: true, id: q.id };
 }
 
-// The answer the asker recommends; the page offers it as a one-click "Accept recommendation".
-// An empty text removes it (and the button with it).
-export function setRecommendation(raw, id, text) {
+// The answer the asker recommends, and why; the page offers it as a one-click "Accept
+// recommendation" (accepting saves the recommendation only). An empty text removes both, and the
+// button with them; a rationale left undefined keeps the one already there.
+export function setRecommendation(raw, id, text, rationale) {
   const q = findQuestion(raw, id);
   const next = String(text ?? "").trim();
-  if ((q.recommendation ?? "") === next) return { changed: false, id: q.id };
+  const why = next ? (rationale === undefined ? q.rationale ?? "" : String(rationale).trim()) : "";
+  if ((q.recommendation ?? "") === next && (q.rationale ?? "") === why) return { changed: false, id: q.id };
   if (next) q.recommendation = next;
   else delete q.recommendation;
+  if (why) q.rationale = why;
+  else delete q.rationale;
   return { changed: true, id: q.id };
 }
 
-export function setRatified(raw, id, ratified) {
+const answered = (q) => q.answer != null && String(q.answer).trim() !== "";
+
+// The owner's Confirm: done with this question; the page hides it for good. Only the page sets it.
+export function setConfirmed(raw, id) {
   const q = findQuestion(raw, id);
-  if (Boolean(q.ratified) === ratified) return { changed: false, id: q.id };
-  q.ratified = ratified;
-  q.ratifiedAt = ratified ? localIso() : null;
+  if (!answered(q)) throw new Conflict(`question "${q.id}" has no answer to confirm`);
+  if (q.confirmed) return { changed: false, id: q.id };
+  q.confirmed = true;
+  q.confirmedAt = localIso();
   return { changed: true, id: q.id };
+}
+
+// The build acted on the answer: the work it asked for landed, or nothing needed doing and the
+// decision is recorded. The page hides it; the note says what was done.
+export function setActed(raw, id, note) {
+  const q = findQuestion(raw, id);
+  if (!answered(q)) throw new Conflict(`question "${q.id}" isn't answered yet`);
+  const what = String(note ?? "").trim();
+  if (q.actedAt && (q.actedNote ?? "") === what) return { changed: false, id: q.id };
+  q.actedAt = localIso();
+  if (what) q.actedNote = what;
+  else delete q.actedNote;
+  return { changed: true, id: q.id };
+}
+
+// ---- comments: the owner's notes to the build, typed into the page (or recorded from chat). The
+// keeper paces each to the main session by its priority and records what became of it; the page
+// shows that trail. Open is new/held/sent; filed, done and declined are closed.
+export const COMMENT_PRIORITIES = ["low", "normal", "high", "urgent"];
+export const COMMENT_STATUSES = ["new", "held", "sent", "filed", "done", "declined"];
+export const COMMENT_OPEN = new Set(["new", "held", "sent"]);
+const COMMENT_MAX = 8000;
+
+function findComment(raw, id) {
+  const c = arr(raw, "comments").find((x) => x && String(x.id) === String(id));
+  if (!c) throw new Conflict(`no comment with id "${id}"`);
+  return c;
+}
+
+// The same text still waiting as `new` is a no-op, so a double-clicked Send can't post it twice.
+export function addComment(raw, { text, priority = "normal", via = "page" }) {
+  const body = String(text ?? "").trim();
+  if (!body) throw new Conflict("a comment can't be empty");
+  if (body.length > COMMENT_MAX) throw new Conflict(`a comment is at most ${COMMENT_MAX} characters`);
+  if (!COMMENT_PRIORITIES.includes(priority)) throw new Conflict(`priority is ${COMMENT_PRIORITIES.join(", ")}`);
+  const list = arr(raw, "comments");
+  const dup = list.find((c) => c && c.text === body && c.status === "new");
+  if (dup) return { changed: false, id: dup.id, note: "already posted" };
+  const n = list.reduce((m, c) => Math.max(m, Number(/^c(\d+)$/.exec(String(c?.id))?.[1]) || 0), 0) + 1;
+  const at = localIso();
+  list.push({ id: `c${n}`, text: body, priority, via, at, status: "new", statusAt: at });
+  return { changed: true, id: `c${n}` };
+}
+
+// What became of it, with a note the page shows beside it. Declining needs the reason.
+export function setCommentStatus(raw, id, status, note) {
+  if (!COMMENT_STATUSES.includes(status) || status === "new") throw new Conflict("status is held, sent, filed, done or declined");
+  const c = findComment(raw, id);
+  const why = String(note ?? "").trim();
+  if (status === "declined" && !why) throw new Conflict("declining a comment needs a note saying why");
+  if (c.status === status && (c.note ?? "") === why) return { changed: false, id: c.id };
+  c.status = status;
+  c.statusAt = localIso();
+  if (why) c.note = why;
+  else delete c.note;
+  arr(c, "trail").push({ at: c.statusAt, status, ...(why ? { note: why } : {}) });
+  return { changed: true, id: c.id };
+}
+
+// The owner changing an open comment's priority sends it back to `new`, so the keeper triages it
+// again at the new level (and tells the main session if it already had it).
+export function setCommentPriority(raw, id, priority) {
+  if (!COMMENT_PRIORITIES.includes(priority)) throw new Conflict(`priority is ${COMMENT_PRIORITIES.join(", ")}`);
+  const c = findComment(raw, id);
+  if (!COMMENT_OPEN.has(c.status ?? "new")) throw new Conflict(`comment "${c.id}" is closed (${c.status})`);
+  if (c.priority === priority) return { changed: false, id: c.id };
+  const at = localIso();
+  arr(c, "trail").push({ at, priority, from: c.priority, status: c.status });
+  c.priority = priority;
+  c.status = "new";
+  c.statusAt = at;
+  return { changed: true, id: c.id };
 }
 
 const isActive = (s) => s.state === "active" || s.state === "doing";

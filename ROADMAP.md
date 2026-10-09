@@ -33,16 +33,11 @@ carries, which are content, not plan items.
   gate's `SOURCE_ROOTS`: a change there is a sync of content authored in `~/.claude/`, not a
   unit of work this file tracks, and including them would fire the gate on every
   `/sync-claude-slash --ship`. Revisit only if the mirror starts carrying original work.
-- ⬜ **MIRROR-6 shipit drift.** In the harness, `skills/shipit/SKILL.md` is now
-  `SKILL.md.disabled`, next to four helper scripts (`hygiene-check.py`, `sysdoc-gate.py`,
-  `sysdoc-staleness.py`, `doc-hygiene-sweep.py`). The mirror still ships the skill as active and
-  has none of the scripts, yet `commands/shipit.md:50-51` calls two of them. Decide what the
-  mirror should carry.
 - ⬜ **MIRROR-7 Sync is blind to sibling files.** `/sync-claude-slash` Phase 1 compares only
   `SKILL.md`, so a changed or added script inside an existing skill never reaches the mirror.
-  That is how MIRROR-6 went unnoticed. Still unmirrored for the same reason:
-  `skills/machine-health/scripts/test_watchdog.py` (a new path, so absent from
-  `.provenance/first-party.txt` until attested).
+  The 2026-10-09 sync caught the backlog up by hand (build-status, lead-keeper, machine-health,
+  ux-tournament, shipit trees); the fix is a whole-tree compare in the harness copy of the
+  command, so the next drift doesn't wait for someone to notice.
 - ⬜ **MIRROR-8 `doc-consolidation` held out.** `usage_gate.py` reads the Claude Code OAuth token
   from the macOS Keychain to call the undocumented `api.anthropic.com/api/oauth/usage` endpoint.
   Rework that before the skill can be mirrored; until then every sync offers it again.
@@ -112,7 +107,7 @@ to prove the install path. If PLUG-1 moves files, PLUG-4 has to land first.
 - ⬜ **PLUG-5 Path rewrites.** Installed plugins live under `~/.claude/plugins/cache/`, so
   hardcoded `~/.claude/skills/...` paths break. These marketplace-bound files still have them:
   `skills/machine-health`, `skills/autonomous-doc-refresh`, `skills/enrich-document`,
-  `skills/shipit`, `commands/shipit` (see MIRROR-6: its scripts aren't even mirrored).
+  `skills/shipit` (helper scripts; the skill itself is disabled), `commands/shipit`.
   Rewrite them to the skill's base directory, shown when the skill loads.
   `skills/ux-tournament` already does this and is the pattern to copy (`<skill dir>/...`).
 - ⬜ **PLUG-7 Local-install rule.** Never install these plugins on the primary machine

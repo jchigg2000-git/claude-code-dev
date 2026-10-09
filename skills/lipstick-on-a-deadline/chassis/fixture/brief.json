@@ -1,0 +1,92 @@
+{
+  "title": "Every manifest, one ledger",
+  "filename": "fx-ledger-view.html",
+  "nav_label": "The journey",
+  "nav_sub": "the whole story",
+  "spine": "A pile of manifests becomes one ledger you can question, and every answer points back to the page it came from.",
+  "metaphor": "a lantern sweeping a dark hold",
+  "metaphors_considered": ["a lantern sweeping a dark hold", "a tide table", "a customs stamp"],
+  "distinct_from_siblings": "The siblings explain screens; this one follows a single manifest from the dock to an answer.",
+  "readers": {
+    "exec": "Ask the ledger anything; each answer shows its source.",
+    "tech": "Structured files parse without a model; the rest is flagged.",
+    "creative": "A lantern that only lights what it can prove."
+  },
+  "direction": {
+    "options": [
+      { "id": "A", "register": "paper-ink", "signature": "spine-path", "type": "serif" },
+      { "id": "B", "register": "night-ink", "signature": "ruled-line", "type": "grotesk" },
+      { "id": "C", "register": "blueprint", "signature": "ink-sweep", "type": "mono" }
+    ],
+    "chosen": "A"
+  },
+  "hero": {
+    "kicker": "Lanternfish",
+    "outcome": "Every manifest becomes one ledger you can question.",
+    "why": "Answers arrive with their receipts, so nobody has to trust a summary they cannot check.",
+    "numbers": [
+      { "id": "manifests", "label": "manifests read in one pass" },
+      { "id": "modelcalls", "label": "model calls for structured files" },
+      { "id": "per", "label": "per new manifest once the ledger exists" }
+    ]
+  },
+  "scenes": [
+    { "id": "s0", "archetype": "hero-alive", "rank": 1, "title": "Start" },
+    { "id": "s1", "archetype": "scrubbed-timeline", "rank": 4, "beat": "journey", "reader": "exec", "title": "The journey",
+      "kicker": "How it came together", "headline": "From a pile to a ledger", "body": "Each step made the next one cheaper.",
+      "items": [
+        { "when": "First pass", "what": "Read every manifest", "note": "Ports and dates, straight from the files.", "count": "manifests" },
+        { "when": "Second pass", "what": "Parse without a model", "note": "Structured files need no guessing." },
+        { "when": "Today", "what": "Ask and get receipts", "note": "Every answer links to its page." }
+      ] },
+    { "id": "s2", "archetype": "full-bleed-number", "rank": 3, "beat": "outcome", "reader": "exec", "title": "The rebuild",
+      "kicker": "Rebuild time", "number": { "id": "rebuild", "unit": "seconds" },
+      "headline": "A full rebuild fits in a coffee break",
+      "then": ["On one laptop, with no cluster.", "So the ledger can be rebuilt whenever a port changes its format."] },
+    { "id": "s3", "archetype": "mechanism-stepper", "rank": 2, "beat": "mechanism", "reader": "tech", "title": "How it works",
+      "kicker": "The mechanism", "headline": "Four rules, played out", "body": "Scroll, or step through it by hand.",
+      "hood": "Each rule is enforced in the parser, not in a prompt." },
+    { "id": "s4", "archetype": "split-before-after", "rank": 5, "beat": "contrast", "reader": "creative", "title": "Before and after",
+      "kicker": "What changes", "headline": "From trust me to show me",
+      "before": { "tag": "Before", "title": "A summary you cannot check", "body": "Someone read the manifests and wrote down what they remember." },
+      "after": { "tag": "After", "title": "An answer with its receipt", "body": "The ledger answers and points at the line it came from." } },
+    { "id": "s5", "archetype": "pinned-argument", "rank": 6, "beat": "why it holds", "reader": "tech", "title": "Why it holds",
+      "kicker": "Why it holds", "headline": "Three layers, each checkable",
+      "figure": { "kind": "stack", "caption": "Files, parsed rows, ledger", "items": [ { "label": "Manifest files" }, { "label": "Parsed rows" }, { "label": "The ledger" } ] },
+      "steps": [
+        { "title": "Files stay the truth", "body": "Nothing is edited in place." },
+        { "title": "Rows are derived", "body": "They can always be rebuilt from the files." },
+        { "title": "The ledger answers", "body": "And shows which rows it used." }
+      ] },
+    { "id": "s6", "archetype": "snap-chapter", "rank": 7, "beat": "limits", "reader": "exec", "title": "The edges",
+      "kicker": "Honest about the edges", "headline": "What it will not do", "list": ["It does not read handwritten notes.", "Unknown port codes are skipped on purpose."] },
+    { "id": "s7", "archetype": "peer-rail", "rank": 8, "beat": "related", "reader": "exec", "title": "Related",
+      "kicker": "Related views", "headline": "Go deeper" },
+    { "id": "s8", "archetype": "close", "rank": 9, "title": "Next", "headline": "Ask it something", "body": "Start with the port you know best." }
+  ],
+  "data": [
+    { "id": "manifests", "value": 412, "src": "README.md:7", "label": "Manifests read" },
+    { "id": "ports", "value": 9, "src": "README.md:7", "label": "Ports" },
+    { "id": "modelcalls", "value": 0, "src": "README.md:8", "label": "Model calls for structured files" },
+    { "id": "per", "value": 0.03, "prefix": "$", "src": "README.md:9", "label": "Cost per new manifest" },
+    { "id": "rebuild", "value": 38, "src": "README.md:10", "label": "Rebuild seconds" },
+    { "id": "perport", "formula": "round(manifests / ports, 1)", "of": ["manifests", "ports"], "label": "Manifests per port" }
+  ],
+  "mechanism": {
+    "kind": "mechanism",
+    "steps": [
+      { "label": "Read the file", "detail": "Every manifest is read as it is, never edited.", "src": "README.md:7" },
+      { "label": "Parse what is structured", "detail": "Tables and codes parse without a model.", "src": "README.md:8" },
+      { "label": "Flag the rest", "detail": "Anything unparsed is flagged, not guessed.", "src": "README.md:14" },
+      { "label": "Answer with receipts", "detail": "Each answer lists the rows and pages it used.", "src": "README.md:3" }
+    ]
+  },
+  "signature": { "preset": "spine-path", "span": ["s0", "s1", "s2", "s3"] },
+  "limits": ["It does not read handwritten notes.", "Unknown port codes are skipped on purpose."],
+  "links": [
+    { "href": "fx-sys-view.html", "label": "The technology", "note": "How the parser works." },
+    { "href": "fx-ui-view.html", "label": "The interface", "note": "Screen by screen." }
+  ],
+  "cut_order": ["s7", "s5"],
+  "sensitive": []
+}

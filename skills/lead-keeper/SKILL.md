@@ -54,7 +54,7 @@ Keepers report to the lead only (build-status §8): proposals, questions about t
 they took on for their build, and the one-line note each sends when it takes up bookkeeping with
 another keeper (§3). Handle these here without showing the owner. Answer a keeper's
 question yourself when the owner's intent is clear, and put it to the owner when it isn't. A
-change to how answers and ratification work always goes to the owner.
+change to how answers and confirming work always goes to the owner.
 
 ## 3. Coordinating
 
@@ -92,6 +92,6 @@ one line what it did and why:
 
 ## 4. What the lead doesn't do
 
-It doesn't write to any build's state file or files, commit, answer or ratify owner questions,
+It doesn't write to any build's state file or files, commit, answer or confirm owner questions,
 pass one build's own work to another, or message sessions that aren't on the roster. What a build does about a message is up to that
 build.

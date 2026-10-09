@@ -88,6 +88,11 @@ function build(co, now, liveMs) {
     openQuestions: s.questions
       .filter((q) => q.answer == null)
       .map((q) => ({ id: q.id, severity: q.severity || "amber", askedAt: q.askedAt || null, question: clip(q.question, 220) })),
+    // The owner's page comments still open (new, held, sent), so the lead can see one sit past its
+    // priority's window (lead/orders.md).
+    openComments: s.comments
+      .filter((c) => ["new", "held", "sent"].includes(c.status ?? "new"))
+      .map((c) => ({ id: c.id, priority: c.priority || "normal", status: c.status || "new", at: c.at || null, statusAt: c.statusAt || null, text: clip(c.text, 160) })),
     recentFindings: s.findings.slice(-5).map((f) => ({ date: f.date || null, kind: f.kind || null, importance: f.importance ?? null, summary: clip(f.summary, 180) })),
     // Keepers run no agents (lead/orders.md), so any `helper:` finding is one the lead reports to the owner.
     helpers: s.findings

@@ -15,20 +15,28 @@ const USAGE = `build-status <verb> [args] [--root DIR]
 
 Record (each is one locked, atomic, id-patched write):
   finding --summary TEXT [--kind K] [--importance 1-3] [--detail TEXT | --detail-file F] [--id ID] [--date YYYY-MM-DD]
-  ask --question TEXT [--severity red|amber|green] [--context TEXT] [--recommend TEXT] [--id ID]
-  recommend QID TEXT (the answer the page offers as "Accept recommendation"; recommend QID "" removes it)
+  ask --question TEXT [--severity red|amber|green] [--context TEXT] --recommend TEXT --rationale TEXT [--id ID]
+  recommend QID TEXT [--rationale TEXT]  (the answer the page offers as "Accept recommendation", and why;
+                     recommend QID "" removes both)
   answer QID --via chat --quote TEXT | --quote-file F   (F = - reads stdin; the owner's words, verbatim)
+  acted QID [--note TEXT]       (the build acted on the answer; the page hides the question)
   step done MATCH | step set MATCH todo|active|done | step add NAME [--state S] | step rename MATCH --name NAME
   note TEXT          (note "" clears it)
   phase TEXT         next-phase LABEL [--force]
   gate NAME STATUS
   init [--steps-json JSON | --steps-file F] [--phase P] [--repo NAME] [--draft] [--force]
   confirm            (clears the unconfirmed-draft marker Bootstrap leaves when nobody was there)
+  comment [TEXT | --text-file F] [--priority low|normal|high|urgent]
+                     (an owner comment given in chat, verbatim; the page's comment box posts its own)
+  comment-status CID held|sent|filed|done|declined [--note TEXT]
+                     (what became of a comment; the page shows the note; declined needs one)
 
 Read and wait:
   locate [--json]    which state file, whose page, attended or not
   answers [--new] [--json]
   await QID [--timeout 4h]      exit 0 with the answer, 2 on timeout
+  comments [--open] [--json]    the owner's comments, open ones first (open = new, held, sent)
+  comments --wait [--timeout 4h]  exit 0 listing the comments waiting for triage (status new), 2 on timeout
   status [--json]
 
 Page:
@@ -44,7 +52,7 @@ Harness:
 Exit codes: 0 ok · 1 usage · 2 await timeout · 3 conflict/no match · 4 state file unparseable ·
 5 no state file (run /build-status to bootstrap) · 6 page owned by the repo's own generator · 7 lock timeout`;
 
-const BOOL = new Set(["json", "open", "force", "draft", "new", "all", "no-serve", "help", "quiet"]);
+const BOOL = new Set(["json", "open", "force", "draft", "new", "all", "no-serve", "help", "quiet", "wait"]);
 
 function parseArgs(argv) {
   const pos = [];
@@ -168,17 +176,19 @@ async function main() {
     case "ask": {
       if (!flags.question) fail(1, "ask needs --question");
       if (flags.severity && !["red", "amber", "green"].includes(flags.severity)) fail(1, "--severity is red, amber or green");
+      if (!flags.recommend || !flags.rationale) process.stderr.write("build-status: every open question needs --recommend and --rationale; set them with `recommend QID TEXT --rationale TEXT`\n");
       await write(
-        (raw) => W.addQuestion(raw, { id: flags.id, question: flags.question, severity: flags.severity, context: flags.context, recommendation: flags.recommend }, { explicitId: Boolean(flags.id) }),
+        (raw) => W.addQuestion(raw, { id: flags.id, question: flags.question, severity: flags.severity, context: flags.context, recommendation: flags.recommend, rationale: flags.rationale }, { explicitId: Boolean(flags.id) }),
         (r) => `question "${r.id}"`,
       );
       return;
     }
     case "recommend": {
       const [qid, ...text] = pos;
-      if (!qid || !text.length) fail(1, `recommend QID TEXT (recommend QID "" removes it)`);
+      if (!qid || !text.length) fail(1, `recommend QID TEXT [--rationale TEXT] (recommend QID "" removes both)`);
       const t = text.join(" ").trim();
-      await write((raw) => W.setRecommendation(raw, qid, t), (r) => `recommendation on "${r.id}" ${t ? "set" : "removed"}`);
+      if (t && flags.rationale === undefined) process.stderr.write("build-status: no --rationale given; the one already recorded, if any, is kept\n");
+      await write((raw) => W.setRecommendation(raw, qid, t, flags.rationale), (r) => `recommendation on "${r.id}" ${t ? "set" : "removed"}`);
       return;
     }
     case "answer": {
@@ -187,6 +197,12 @@ async function main() {
       if (!qid || !flags.quote) fail(1, "answer needs QID and --quote TEXT (or --quote-file F, - for stdin)");
       if (flags.via && flags.via !== "chat") fail(1, "the shim records chat answers only (--via chat); the page records its own");
       await write((raw) => W.setAnswer(raw, qid, { answer: flags.quote, via: "chat", quote: flags.quote }), (r) => `answer to "${r.id}" (via chat)`);
+      return;
+    }
+    case "acted": {
+      const [qid] = pos;
+      if (!qid) fail(1, "acted QID [--note TEXT]");
+      await write((raw) => W.setActed(raw, qid, flags.note), (r) => `"${r.id}" acted on`);
       return;
     }
     case "step": {
@@ -221,6 +237,20 @@ async function main() {
     case "confirm":
       await write((raw) => (raw.draft ? (delete raw.draft, { changed: true }) : { changed: false }), () => "step list confirmed");
       return;
+    case "comment": {
+      const text = flags["text-file"] ? readFileSync(flags["text-file"] === "-" ? 0 : flags["text-file"], "utf8").trim() : pos.join(" ").trim();
+      if (!text) fail(1, "comment TEXT (or --text-file F, - for stdin) [--priority low|normal|high|urgent]");
+      const priority = flags.priority ?? "normal";
+      if (!W.COMMENT_PRIORITIES.includes(priority)) fail(1, `--priority is ${W.COMMENT_PRIORITIES.join(", ")}`);
+      await write((raw) => W.addComment(raw, { text, priority, via: "chat" }), (r) => `comment "${r.id}" (${priority})`);
+      return;
+    }
+    case "comment-status": {
+      const [cid, status] = pos;
+      if (!cid || !status) fail(1, "comment-status CID held|sent|filed|done|declined [--note TEXT]");
+      await write((raw) => W.setCommentStatus(raw, cid, status, flags.note), (r) => `comment "${r.id}" ${status}`);
+      return;
+    }
   }
 
   // ---- reads -------------------------------------------------------------------------------
@@ -239,6 +269,45 @@ async function main() {
       if (flags.json) return console.log(JSON.stringify(summary, null, 2));
       console.log(`${st.repo || co.root.split("/").pop()} — ${done}/${st.steps.length} steps, gate: ${gate}, ${st.findings.length} findings, ${open} open questions${summary.draft ? " (step list unconfirmed)" : ""}`);
       return;
+    }
+    case "comments": {
+      const RANK = { urgent: 4, high: 3, normal: 2, low: 1 };
+      const read = async () => {
+        try {
+          return (await loadState(loc.statePath)).state.comments;
+        } catch (err) {
+          if (flags.wait) return null; // a write in flight; the next poll reads it
+          fail(EXIT[err.code] ?? 1, err.message);
+        }
+      };
+      const show = (list) => {
+        if (flags.json) return console.log(JSON.stringify(list, null, 2));
+        if (!list.length) return console.log(flags.open ? "no open comments" : "no comments");
+        for (const c of list) {
+          console.log(`${c.id}  [${c.priority ?? "normal"}] ${c.status ?? "new"}  ${c.at ?? "?"}  "${c.text}"`);
+          if (c.note) console.log(`      note: ${c.note}`);
+        }
+      };
+      const order = (a, b) =>
+        Number(W.COMMENT_OPEN.has(b.status ?? "new")) - Number(W.COMMENT_OPEN.has(a.status ?? "new")) ||
+        (RANK[b.priority] ?? 2) - (RANK[a.priority] ?? 2) ||
+        String(a.at ?? "").localeCompare(String(b.at ?? ""));
+      if (flags.wait) {
+        const { parseDuration } = await import("./lib/answers.mjs");
+        const end = Date.now() + parseDuration(flags.timeout ?? "4h");
+        for (;;) {
+          const fresh = ((await read()) ?? []).filter((c) => (c.status ?? "new") === "new").sort(order);
+          if (fresh.length) return show(fresh);
+          if (Date.now() >= end) {
+            console.log("build-status: no new comment yet (timed out)");
+            process.exitCode = 2;
+            return;
+          }
+          await new Promise((r) => setTimeout(r, Math.min(2000, Math.max(0, end - Date.now()))));
+        }
+      }
+      const all = (await read()).slice().sort(order);
+      return show(flags.open ? all.filter((c) => W.COMMENT_OPEN.has(c.status ?? "new")) : all);
     }
     case "answers": {
       const { answersCommand } = await import("./lib/answers.mjs");
