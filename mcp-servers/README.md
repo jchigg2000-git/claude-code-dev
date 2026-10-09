@@ -1,12 +1,15 @@
 # MCP servers
 
-Local custom MCP servers for the Claude Code harness. Both are pure-stdlib Python,
-raw JSON-RPC 2.0 over stdio (no pip/npm deps) — single-file, run anywhere with Python 3.
+Two small local servers that give Claude extra tools to call. Both are a single
+pure-stdlib Python file speaking raw JSON-RPC 2.0 over stdio, so there's nothing to
+install beyond Python 3.
 
-| Server          | Purpose                                                        |
-| --------------- | ------------------------------------------------------------- |
-| `port-registry` | Single source of truth for dev-app port assignments.          |
-| `loose-ends`    | Surfaces unfinished work / memories scoped to the current repo.|
+| Server | What it's for | Tools it gives Claude |
+| --- | --- | --- |
+| `port-registry` | Stops two local apps fighting over the same network port. When Claude sets up a new server or frontend, it asks for a free port instead of guessing one, and the choice is recorded in one shared registry file. | `claim_port` reserves a free port and records it. `get_registry` shows every assignment. |
+| `loose-ends` | Tells Claude what's unfinished in a repo the moment you start working there: uncommitted or unpushed work, new TODOs, stale or missing docs, open backlog items, and saved memories about the repo. | `get_loose_ends` returns that digest for a repo (the current one by default). |
+
+`/generate-port-registry` builds the registry file and installs `port-registry` for you.
 
 ## Register (per machine)
 

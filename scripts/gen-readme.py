@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
-"""Regenerate the README's Skills and Slash-commands tables from frontmatter.
+"""Regenerate the README's grouped catalog of commands, skills and MCP servers.
 
 Pure stdlib, no dependencies — matches this repo's no-build, no-package ethos.
 
-The script is the single source of truth for the two index tables in README.md.
-It reads the `description` frontmatter from every `commands/*.md` and every
-`skills/*/SKILL.md`, then rewrites the content between the marker pairs:
+Two sources, because they serve two readers:
 
-    <!-- BEGIN:skills -->   ... <!-- END:skills -->
-    <!-- BEGIN:commands --> ... <!-- END:commands -->
+- `docs/readme-catalog.json` — a plain-English one-line summary and a group for
+  every entry. Written for people browsing GitHub; lives only in this repo.
+- each file's `description` frontmatter — written for Claude (it decides when a
+  skill fires), synced from ~/.claude. Used only as the fallback for an entry the
+  catalog doesn't cover yet, cut to its first sentence.
 
-Everything outside those markers (Install, Conventions, License, section prose)
-is left untouched. Files that lack a `description` frontmatter key fall back to
-their first non-empty body line so nothing goes silently undocumented.
+It discovers every `commands/*.md`, `skills/*/SKILL.md` and
+`mcp-servers/*/server.py`, then rewrites the content between
+
+    <!-- BEGIN:catalog --> ... <!-- END:catalog -->
+
+Everything outside those markers is left untouched. An entry with no catalog
+summary is listed under "Not yet summarized" and named on stderr; a catalog key
+with no matching file is an error, so a removed skill can't leave a ghost row.
 
 Usage:
     python3 scripts/gen-readme.py          # rewrite README.md in place
@@ -22,13 +28,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-README = REPO_ROOT / "README.md"
-COMMANDS_DIR = REPO_ROOT / "commands"
-SKILLS_DIR = REPO_ROOT / "skills"
+CATALOG = "docs/readme-catalog.json"
+UNSORTED = {"id": "unsorted", "title": "Not yet summarized",
+            "blurb": f"New arrivals with no plain summary in `{CATALOG}` yet; the text is "
+                     "the first sentence of the description Claude reads."}
+KINDS = {"commands": "command", "skills": "skill", "mcp": "MCP server"}
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -109,25 +119,71 @@ def describe(path: Path) -> str:
     return desc
 
 
-def build_commands_table() -> str:
-    rows = ["| Command | What it does |", "|---|---|"]
-    for path in sorted(COMMANDS_DIR.glob("*.md")):
-        name = path.stem
-        desc = describe(path)
-        link = f"commands/{path.name}"
-        rows.append(f"| [`/{name}`]({link}) | {cell(desc)} |")
-    return "\n".join(rows)
+def first_sentence(desc: str) -> str:
+    """Fallback summary: the description's first sentence, trigger phrases cut."""
+    desc = re.split(r"\s*\b(?:Fire on|Fires on|FIRES ONLY)\b", desc)[0].strip()
+    m = re.match(r"(.+?[.!?])(?:\s|$)", desc)
+    text = m.group(1) if m else desc
+    return text if len(text) <= 200 else text[:199].rstrip() + "…"
 
 
-def build_skills_table() -> str:
-    rows = ["| Skill | What it does |", "|---|---|"]
-    for skill_md in sorted(SKILLS_DIR.glob("*/SKILL.md")):
-        fm, body = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
-        name = fm.get("name", "").strip() or skill_md.parent.name
-        desc = fm.get("description", "").strip() or first_body_line(body)
-        link = f"skills/{skill_md.parent.name}/SKILL.md"
-        rows.append(f"| [`{name}`]({link}) | {cell(desc)} |")
-    return "\n".join(rows)
+def discover(root: Path) -> dict[str, tuple[str, Path]]:
+    """Catalog key → (display name, link path) for everything that ships."""
+    found: dict[str, tuple[str, Path]] = {}
+    for path in sorted((root / "commands").glob("*.md")):
+        found[f"commands/{path.stem}"] = (f"/{path.stem}", path)
+    for path in sorted((root / "skills").glob("*/SKILL.md")):
+        found[f"skills/{path.parent.name}"] = (path.parent.name, path)
+    for path in sorted((root / "mcp-servers").glob("*/server.py")):
+        found[f"mcp/{path.parent.name}"] = (path.parent.name, path.parent)
+    return found
+
+
+def slug(title: str) -> str:
+    """GitHub's heading anchor for a plain-text title."""
+    return re.sub(r"[^\w\- ]", "", title.lower()).replace(" ", "-")
+
+
+def build_catalog(root: Path) -> tuple[str, list[str]]:
+    """Return (markdown for the catalog block, keys with no catalog summary)."""
+    catalog = json.loads((root / CATALOG).read_text(encoding="utf-8"))
+    groups = catalog["groups"]
+    entries = catalog["entries"]
+    found = discover(root)
+
+    orphans = sorted(set(entries) - set(found))
+    if orphans:
+        sys.exit(f"error: {CATALOG} lists entries with no matching file: {', '.join(orphans)}. "
+                 "Remove them (or restore the file).")
+    group_ids = {g["id"] for g in groups}
+    bad = sorted(k for k, e in entries.items() if e.get("group") not in group_ids)
+    if bad:
+        sys.exit(f"error: {CATALOG} entries with an unknown group: {', '.join(bad)}")
+
+    rows: dict[str, list[str]] = {g["id"]: [] for g in groups + [UNSORTED]}
+    missing = []
+    # Rows follow the catalog's own order (it reads 1–8 for the harden steps); uncatalogued last.
+    order = {key: i for i, key in enumerate(entries)}
+    for key in sorted(found, key=lambda k: (order.get(k, len(order)), k)):
+        name, path = found[key]
+        entry = entries.get(key)
+        if entry and entry.get("summary", "").strip():
+            group, summary = entry["group"], entry["summary"].strip()
+        else:
+            missing.append(key)
+            group = "unsorted"
+            summary = first_sentence(describe(path)) if path.is_file() else ""
+        link = path.relative_to(root).as_posix() + ("/" if path.is_dir() else "")
+        kind = KINDS[key.split("/", 1)[0]]
+        rows[group].append(f"| [`{name}`]({link}) | {kind} | {cell(summary)} |")
+
+    shown = [g for g in groups + [UNSORTED] if rows[g["id"]]]
+    out = ["**At a glance:**", ""]
+    out += [f"- [{g['title']}](#{slug(g['title'])}) ({len(rows[g['id']])})" for g in shown]
+    for g in shown:
+        out += ["", f"### {g['title']}", "", g["blurb"], "",
+                "| Name | Kind | What it does |", "|---|---|---|", *rows[g["id"]]]
+    return "\n".join(out), missing
 
 
 def replace_between(text: str, marker: str, replacement: str) -> str:
@@ -138,18 +194,17 @@ def replace_between(text: str, marker: str, replacement: str) -> str:
         e = text.index(end, b)
     except ValueError:
         sys.exit(
-            f"error: markers {begin} / {end} not found in {README.name}. "
-            "Add the marker pair around the table before running the generator."
+            f"error: markers {begin} / {end} not found in README.md. "
+            "Add the marker pair around the catalog before running the generator."
         )
     before = text[: b + len(begin)]
     after = text[e:]
     return f"{before}\n{replacement}\n{after}"
 
 
-def render(current: str) -> str:
-    out = replace_between(current, "skills", build_skills_table())
-    out = replace_between(out, "commands", build_commands_table())
-    return out
+def render(current: str, root: Path = REPO_ROOT) -> tuple[str, list[str]]:
+    block, missing = build_catalog(root)
+    return replace_between(current, "catalog", block), missing
 
 
 def main() -> int:
@@ -161,8 +216,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    current = README.read_text(encoding="utf-8")
-    updated = render(current)
+    readme = REPO_ROOT / "README.md"
+    current = readme.read_text(encoding="utf-8")
+    updated, missing = render(current)
+    if missing:
+        # Never fails the run: a fresh sync must not be blocked on prose.
+        print(f"{len(missing)} entries have no summary in {CATALOG} "
+              f"(listed under \"{UNSORTED['title']}\"): {', '.join(missing)}", file=sys.stderr)
 
     if args.check:
         if current != updated:
@@ -178,9 +238,8 @@ def main() -> int:
         print("README.md already up to date.")
         return 0
 
-    README.write_text(updated, encoding="utf-8")
-    print(f"README.md regenerated ({len(list(COMMANDS_DIR.glob('*.md')))} commands, "
-          f"{len(list(SKILLS_DIR.glob('*/SKILL.md')))} skills).")
+    readme.write_text(updated, encoding="utf-8")
+    print(f"README.md regenerated ({len(discover(REPO_ROOT))} entries).")
     return 0
 
 

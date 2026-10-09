@@ -1,4 +1,23 @@
-# build-status (tier 1)
+# build-status
+
+A live progress page for whatever Claude is building. Type `/build-status` in any repo and a page
+opens in your browser, then updates itself as the work moves along. It shows:
+
+- **Steps:** what's done, what's in progress and what's left, as a short plain list.
+- **Commits:** the recent git history for this piece of work.
+- **Checks:** whether tests, lint and the other quality checks the repo has are passing.
+- **Findings:** things worth knowing that turned up along the way.
+- **Questions for you:** decisions Claude needs from you. Answer on the page and the answer goes
+  back to the session.
+- **A comment box:** leave a note at low, normal, high or urgent priority. The priority sets how
+  soon the working session hears it.
+
+It exists so you can see where a long build stands without stopping it to ask. Claude asks you to
+confirm the starting step list rather than inventing one. Nothing pops up when nobody's watching
+(a headless or looping session), and it never commits. It works in any repo: Node, Rust, Go or
+none. Its state lives in `.claude/build-status.json` in the repo.
+
+## How it's built
 
 `/build-status` as a skill plus a deterministic CLI. The skill (`SKILL.md`) makes the judgment
 calls: attach or bootstrap, the starting step list, gates, and what counts as a finding. The CLI

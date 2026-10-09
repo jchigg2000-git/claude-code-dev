@@ -107,13 +107,14 @@ Without `--ship`, skip this entirely (sync only). With `--ship`, commit and merg
 
 Inherit shipit's hard invariants: single attempt per mutating command; never `--force`/`--no-verify`/`reset --hard`/`branch -D`/any `-i`; never delete a branch until the feature tip is confirmed on `origin/main`. On any conflict, non-FF, detached HEAD, in-progress merge/rebase, or anything unexpected → **stop-clean**: abort only what this run started (`git -C "$MIRROR" merge --abort`), report exactly where the work lives (it is safe — in the mirror's working tree and/or the `ship/...` branch), and stop. Do not retry.
 
-**Curation safety:** only commit files under `commands/` and `skills/` that Phase 1 updated or Phase 2 added — stage those explicit paths, never `git add -A`. A live-only file you didn't sync cannot be published by `--ship`.
+**Curation safety:** only commit files under `commands/` and `skills/` that Phase 1 updated or Phase 2 added — stage those explicit paths, never `git add -A`. A live-only file you didn't sync cannot be published by `--ship`. The one exception is `README.md`, regenerated in step 4 purely from what this run synced.
 
 Steps:
 1. `git -C "$MIRROR" status --porcelain -- commands skills` — if empty, report `nothing to ship` and go to closeout.
 2. `git -C "$MIRROR" fetch origin`. Confirm on `main` and FF-able: behind → `pull --ff-only`; not on `main`, diverged, or non-FF → stop-clean.
 3. `SHA=$(git -C "$MIRROR" rev-parse --short HEAD)`; `git -C "$MIRROR" checkout -b "ship/harness-sync-$SHA"`.
 4. Stage only the synced paths: `git -C "$MIRROR" add -- <each updated/added commands/… and skills/… path from Phases 1–2>`.
+   Then regenerate the README catalog from what's now on disk: `python3 "$MIRROR/scripts/gen-readme.py"`. If `README.md` changed, stage it too. If the generator names entries with no summary (a skill or command this run added), carry that list into the closeout. Don't write summaries yourself; they live in `$MIRROR/docs/readme-catalog.json`, and the user writes them or asks for them.
 5. Commit. Subject: `docs: sync harness commands/skills to mirror` (≤72 chars). Body: bulleted list of the updated/added files. Strip any `sk-…`/`ghp_…`/`AKIA…`/`-----BEGIN`-style token from the message. Final line: `Co-Authored-By: Claude <noreply@anthropic.com>`.
 6. `git -C "$MIRROR" push -u origin HEAD`.
 7. `git -C "$MIRROR" checkout main && git -C "$MIRROR" pull --ff-only && git -C "$MIRROR" merge --ff-only "ship/harness-sync-$SHA"` (if not FF-able, `merge --no-ff` with the default message; on conflict → `merge --abort` + stop-clean).
@@ -129,6 +130,7 @@ Print a short summary:
 - **Added:** count + names from Phase 2.
 - **Skipped:** count + names from Phase 2 declines.
 - **Repo-only:** count from Phase 1 (mirror files with no harness counterpart).
+- **Needs a README summary:** any entries `gen-readme.py` reported as unsummarized (Phase 3 only). They show up under "Not yet summarized" on GitHub until a line is added to `docs/readme-catalog.json`.
 
 Final line:
 - If `--ship` ran: report the result — `Shipped to claude-code-dev main (<sha>); ship branch cleaned up.` (or, if Phase 3 stopped-clean, the state report telling the user exactly where the work lives).
