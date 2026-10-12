@@ -226,10 +226,11 @@ python3 scripts/provenance-gate.py --all      # whole tree
 python3 scripts/provenance-gate.py --attest <path>   # approve new first-party work
 ```
 
-Two layers, because they fail differently:
+Three layers, because they fail differently:
 
 1. **Path allowlist** — `.provenance/first-party.txt` lists every attested path under `commands/` and `skills/`. Anything at a **new** path is denied until you attest it by hand. This is what catches a bulk sync sweeping in a directory nobody read.
 2. **Content heuristics** — run on every scanned file *including* allowlisted ones, since layer 1 is blind to a vendor file that overwrites an approved path. They look for what a published artifact leaves behind: a self-declared skill id/version, a telemetry caller string, pinned deep links into someone else's source tree, a foreign copyright or non-MIT SPDX id, a vendor `llms.txt` docs feed, a bundled `LICENSE` or package manifest, semver frontmatter.
+3. **Known third-party** — `.provenance/not-first-party.txt` lists harness paths already judged not yours. They're blocked even if allowlisted, `--attest` refuses them, and no `exceptions.txt` line can waive them.
 
 Blocking rules are deliberately biased toward false positives — a blocked commit costs one line in `.provenance/exceptions.txt` (`path`, `rule`, `reason`, tab-separated); a miss costs a license violation in a public repo. Two rules warn instead of blocking: `fat-skill-tree` and `unreviewed-install-hint`.
 
