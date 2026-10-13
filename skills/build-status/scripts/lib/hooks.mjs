@@ -31,19 +31,20 @@ export async function runHook(event, payload = {}) {
     const { items } = await pendingFor(co, { sessionId, rule: "unseen-by-any" });
     // The session's own clock starts now either way, for user-prompt and stop.
     const session = { startedAt: new Date().toISOString(), seen: {} };
-    const after = () => markDelivered(co, items, sessionId, session);
-    if (!items.length) return { after };
-    return { out: context("SessionStart", formatBlock(co, items, { updated: updatedIn(co, items) })), after };
+    if (!items.length) return { after: () => markDelivered(co, [], sessionId, session) };
+    // Only the batch the block shows is marked; the rest stay pending for `answers --new`.
+    const { text, shown } = formatBlock(co, items, { updated: updatedIn(co, items) });
+    return { out: context("SessionStart", text), after: () => markDelivered(co, shown, sessionId, session) };
   }
 
   if (event === "user-prompt" || event === "stop") {
     if (event === "stop" && payload.stop_hook_active) return null;
     const { items, session } = await pendingFor(co, { sessionId, rule: "since-session-start" });
     if (!items.length) return null;
-    const text = formatBlock(co, items, { updated: updatedIn(co, items) });
+    const { text, shown } = formatBlock(co, items, { updated: updatedIn(co, items) });
     return {
       out: event === "stop" ? { decision: "block", reason: text } : context("UserPromptSubmit", text),
-      after: () => markDelivered(co, items, sessionId, session),
+      after: () => markDelivered(co, shown, sessionId, session),
     };
   }
   return null;

@@ -14,6 +14,24 @@ test("a gate{} object renders its gates", () => {
   assert.doesNotMatch(html, /no gates detected/);
 });
 
+test("the gate roll-up says ok only when every gate passed, in either state shape", () => {
+  const gate = (raw) => render(normalize(raw), { title: "t" }).gate;
+  const pass = { name: "lint", status: "clean" };
+  assert.equal(gate({ gates: [] }), "none");
+  assert.equal(gate({}), "none");
+  assert.equal(gate({ gates: [pass, { name: "test", status: "112 passed, 1 skipped" }] }), "ok");
+  assert.equal(gate({ gates: [pass, { name: "types", status: "2 errors" }] }), "warn");
+  assert.equal(gate({ gates: [{ name: "test", status: "not run" }] }), "unknown");
+  assert.equal(gate({ gates: [pass, { name: "test", status: "not run" }] }), "unknown");
+  assert.equal(gate({ gate: { typecheck: "clean", tests: "12 passed" } }), "ok");
+  assert.equal(gate({ gate: { typecheck: "clean", tests: { status: "skipped" } } }), "unknown");
+  assert.equal(gate({ gate: { typecheck: "clean", tests: { status: "1 failed" } } }), "warn");
+  // "broken" and "not ok" are failures, not passes that happen to contain "ok".
+  assert.equal(gate({ gates: [{ name: "build", status: "broken" }] }), "warn");
+  assert.equal(gate({ gates: [{ name: "tap", status: "not ok 3" }] }), "warn");
+  assert.match(page({ gates: [{ name: "build", status: "broken" }] }), /<span class="pill warn">build broken<\/span>/);
+});
+
 test("refreshSuspended never looks at the active tab", () => {
   const html = page({ steps: [] });
   const body = /function refreshSuspended\(\)\{([\s\S]*?)\n  \}/.exec(html)[1];

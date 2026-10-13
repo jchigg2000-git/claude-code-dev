@@ -8,6 +8,7 @@
 import { readFileSync, writeSync } from "node:fs";
 import { join, relative } from "node:path";
 import { buildId, git, localDate, resolveCheckout, SCRIPTS_DIR } from "./lib/paths.mjs";
+import { gateSummary } from "./lib/normalize.mjs";
 import { isAttended, loadState, locate } from "./lib/state.mjs";
 import * as W from "./lib/write.mjs";
 
@@ -33,11 +34,11 @@ Record (each is one locked, atomic, id-patched write):
 
 Read and wait:
   locate [--json]    which state file, whose page, attended or not
-  answers [--new] [--json]
+  answers [--new] [--json]      --new: undelivered answers, at most 5 per pull (the rest wait for the next); --json: all
   await QID [--timeout 4h]      exit 0 with the answer, 2 on timeout
   comments [--open] [--json]    the owner's comments, open ones first (open = new, held, sent)
   comments --wait [--timeout 4h]  exit 0 listing the comments waiting for triage (status new), 2 on timeout
-  status [--json]
+  status [--json]    gate: ok (every gate passed) | warn (one failed) | unknown (one not run or unrecognised) | none
 
 Page:
   render [--open] [--no-serve] [--port N]
@@ -264,7 +265,7 @@ async function main() {
       }
       const done = st.steps.filter((s) => s.state === "done").length;
       const open = st.questions.filter((q) => q.answer == null).length;
-      const gate = !st.gates.length ? "none" : st.gates.some((g) => g.ok === false) ? "warn" : "ok";
+      const gate = gateSummary(st.gates);
       const summary = { root: co.root, statePath: loc.statePath, phase: st.phase, done, steps: st.steps.length, gate, findings: st.findings.length, openQuestions: open, draft: Boolean(st.extra.draft) };
       if (flags.json) return console.log(JSON.stringify(summary, null, 2));
       console.log(`${st.repo || co.root.split("/").pop()} — ${done}/${st.steps.length} steps, gate: ${gate}, ${st.findings.length} findings, ${open} open questions${summary.draft ? " (step list unconfirmed)" : ""}`);

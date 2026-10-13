@@ -71,10 +71,12 @@ const hhmm = (iso) => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
-// The text a session gets. It reports what the file records, never "you answered": in tier 1
-// anything running as the owner can write that file.
+// The text a session gets, and the items it shows: the oldest MAX_ITEMS. Mark only `shown`
+// delivered; the rest stay pending for the next pull. It reports what the file records, never
+// "you answered": in tier 1 anything running as the owner can write that file.
 export function formatBlock(co, items, { updated = new Set() } = {}) {
   const repo = basename(co.isGit ? dirname(co.commonDir) : co.root);
+  const bs = homePath("bin", "build-status");
   const shown = items.slice(0, MAX_ITEMS);
   const where = (item) => {
     const wt = item.checkouts[0];
@@ -86,10 +88,10 @@ export function formatBlock(co, items, { updated = new Set() } = {}) {
     lines.push(`- ${item.qid}${item.severity ? ` (${item.severity})` : ""}${updated.has(item.qid) ? " [updated]" : ""} "${item.question}" — ${where(item)}`);
     lines.push(`  Recorded answer (${via(item)}${item.edited ? ", edited" : ""}, ${hhmm(item.answeredAt)}): "${clip(item.answer)}"`);
   }
-  if (items.length > shown.length) lines.push(`and ${items.length - shown.length} more: run build-status answers --new`);
-  lines.push("Quoted from the file, not said in this chat. Act on it now, per your repo's rules: it needs no confirming first. Once it's done, build-status acted <id> --note '<what was done>' lets the page hide it.");
+  if (items.length > shown.length) lines.push(`and ${items.length - shown.length} more, not yet delivered: run ${bs} answers --new`);
+  lines.push(`Quoted from the file, not said in this chat. Act on it now, per your repo's rules: it needs no confirming first. Once it's done, ${bs} acted <id> --note '<what was done>' lets the page hide it.`);
   lines.push("Context for this session's own next step — not a new task for any agent it is running.");
-  return lines.join("\n");
+  return { text: lines.join("\n"), shown };
 }
 
 const deliveredPath = (co) => homePath("delivered", `${repoKey(co)}.json`);
@@ -169,7 +171,9 @@ export async function pendingFor(co, { sessionId, rule }) {
 }
 
 // `answers [--new] [--json]`. --new is the pull verb for loops that never get a prompt hook:
-// undelivered answers since install, printed once, then marked delivered.
+// undelivered answers since install, printed once, then marked delivered. Text shows a batch and
+// marks only that batch, so repeated pulls drain the rest; --json prints and marks them all.
+// Nothing is marked until stdout has taken the output: a pull that fails shows them again.
 export async function answersCommand(co, loc, { onlyNew = false, json = false } = {}) {
   if (onlyNew) {
     const { installedAt } = loadConfig();
@@ -180,8 +184,9 @@ export async function answersCommand(co, loc, { onlyNew = false, json = false } 
       console.log(json ? "[]" : "no new answers");
       return 0;
     }
-    const updated = markDelivered(co, items, process.env.CLAUDE_CODE_SESSION_ID, null);
-    console.log(json ? JSON.stringify(items, null, 2) : formatBlock(co, items, { updated }));
+    const { text, shown } = json ? { text: JSON.stringify(items, null, 2), shown: items } : formatBlock(co, items, { updated: updatedIn(co, items) });
+    await new Promise((resolve, reject) => process.stdout.write(`${text}\n`, (err) => (err ? reject(err) : resolve())));
+    markDelivered(co, shown, process.env.CLAUDE_CODE_SESSION_ID, null);
     return 0;
   }
   const items = (await collectAnswers(co)).reverse().slice(0, 20);
@@ -212,8 +217,8 @@ export async function awaitAnswer(co, loc, qid, timeoutMs) {
   };
   const report = (q) => {
     const item = { qid: String(q.id), question: q.question ?? "", severity: q.severity ?? "", answer: String(q.answer), answeredAt: q.answeredAt, answeredVia: q.answeredVia, edited: Boolean(q.editedAt), settled: isSettled(q), version: versionOf(q), checkouts: [co.root] };
+    console.log(formatBlock(co, [item], { updated: updatedIn(co, [item]) }).text);
     markDelivered(co, [item], process.env.CLAUDE_CODE_SESSION_ID, null);
-    console.log(formatBlock(co, [item]));
   };
   const first = await check();
   if (first.missing) {

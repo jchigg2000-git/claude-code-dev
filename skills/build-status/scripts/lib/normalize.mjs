@@ -8,11 +8,21 @@ const KNOWN = new Set([
   "measures", "findings", "note", "questions", "comments",
 ]);
 
+// true passed, false failed, null not run or not recognised. "ok" is a whole word ("broken" isn't
+// a pass), and a negated pass ("not ok", "not passing") is a failure.
 export function gateOk(status) {
   const t = String(status ?? "").toLowerCase();
-  if (/fail|error|\bwarn|problem|issue/.test(t)) return false;
-  if (/clean|pass|ok/.test(t)) return true;
+  if (/fail|error|\bwarn|problem|issue|broken|\bnot (ok|pass|clean)/.test(t)) return false;
+  if (/clean|pass|\bok\b/.test(t)) return true;
   return null;
+}
+
+// The one roll-up `status`, `render` and the page share: ok only when every gate passed; any
+// failure is warn; a gate not run or not recognised keeps it at unknown.
+export function gateSummary(gates) {
+  if (!gates.length) return "none";
+  if (gates.some((g) => g.ok === false)) return "warn";
+  return gates.every((g) => g.ok === true) ? "ok" : "unknown";
 }
 
 export function normalizeGates(raw) {

@@ -10,7 +10,7 @@ opens in your browser, then updates itself as the work moves along. It shows:
 - **Questions for you:** decisions Claude needs from you. Answer on the page and the answer goes
   back to the session.
 - **A comment box:** leave a note at low, normal, high or urgent priority. The priority sets how
-  soon the working session hears it.
+  soon the working session hears it, as long as something in that session is watching for comments.
 
 It exists so you can see where a long build stands without stopping it to ask. Claude asks you to
 confirm the starting step list rather than inventing one. Nothing pops up when nobody's watching
@@ -37,7 +37,8 @@ scripts/lib/
   paths.mjs              checkout identity, per-worktree files in the git dir, ~/.build-status layout
   write.mjs              the one write path: O_EXCL lock (broken only if its holder is dead),
                          re-read, patch by id, temp + fsync + rename, re-check for unlocked writers
-  normalize.mjs          one read view of either state shape (gates[] or gate{}, plain findings)
+  normalize.mjs          one read view of either state shape (gates[] or gate{}, plain findings);
+                         the gate roll-up (ok only when every gate passed; unknown if one wasn't run)
   state.mjs              attach before bootstrap: a repo's own generator wins; attended detection
   render.mjs             the page as a pure function; ctx.extraTabs is the seam for repo-specific tabs
   page.mjs git.mjs       what render needs; the static file:// copy

@@ -92,3 +92,17 @@ test("recommend and step rename: a recommendation is set, replaced and removed; 
   assert.equal(after.name, "CON-3f: the cert check as a permission");
   assert.equal(sb.cliStatus(["step", "rename", "CON-3f", "--name", "other"]).code, 3, "a name another step has is refused");
 });
+
+test("status says gate: unknown while a gate hasn't run, and agrees with --json", () => {
+  const sb = sandbox();
+  sandboxes.push(sb);
+  sb.cli(["init", "--steps-json", "[]"]);
+  const gate = () => [/gate: (\w+)/.exec(sb.cli(["status"]))[1], JSON.parse(sb.cli(["status", "--json"])).gate];
+  assert.deepEqual(gate(), ["none", "none"]);
+  sb.cli(["gate", "lint", "clean"]);
+  assert.deepEqual(gate(), ["ok", "ok"]);
+  sb.cli(["gate", "test", "not run"]);
+  assert.deepEqual(gate(), ["unknown", "unknown"]);
+  sb.cli(["gate", "test", "1 failed"]);
+  assert.deepEqual(gate(), ["warn", "warn"]);
+});

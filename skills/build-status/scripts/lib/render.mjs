@@ -3,7 +3,7 @@
 // ctx, gathered by page.mjs. No fs, no git, no process state in here — so the CLI, the daemon and
 // (later) a hub can all render the same page, and a repo-specific layer can add tabs through
 // ctx.extraTabs without touching this file.
-import { isSettled } from "./normalize.mjs";
+import { gateSummary, isSettled } from "./normalize.mjs";
 
 const esc = (s) =>
   String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -176,8 +176,8 @@ const COMMENT_PRIORITIES = [["low", "Low"], ["normal", "Normal"], ["high", "High
 const COMMENT_HINTS = {
   low: "Whenever it fits: the keeper holds it and passes it on with others at a step's end. It may go straight to the backlog.",
   normal: "At the build's next break (a step done, a merge), within the hour. The build does it, files it, or declines with a reason.",
-  high: "Within about 10 minutes, before the build starts its next piece of work. It must weigh it and say what it will do.",
-  urgent: "Now. The build stops at the next safe point and deals with it. If it disagrees, it asks you rather than carry on.",
+  high: "At the keeper's next pass (about 10 minutes while it runs on a timer), before the build starts its next piece of work. It must weigh it and say what it will do.",
+  urgent: "As soon as the build sees it: within seconds while its keeper is watching, otherwise at the next pass. It stops at the next safe point and deals with it. If it disagrees, it asks you rather than carry on.",
 };
 
 // live: whether a server is actually reachable for this repo right now (so Save/Confirm work).
@@ -223,11 +223,10 @@ export function render(state, ctx = {}) {
     .join("");
 
   // Gate status is free-text (see command doc) rather than a fixed enum, because the detected
-  // toolchain varies per repo (npm script vs cargo vs go vet). Classify by keyword so any tool's
-  // own wording ("clean", "3 problems", "112 passed") still renders the right pill color.
+  // toolchain varies per repo (npm script vs cargo vs go vet). normalize's gateOk classifies it by
+  // keyword, so any tool's own wording ("clean", "3 problems", "112 passed") colours the pill.
   const gatePill = (g) => {
-    const t = String(g.status || "").toLowerCase();
-    const cls = /fail|error|\bwarn|problem|issue/.test(t) ? "warn" : /clean|pass|ok/.test(t) ? "ok" : "";
+    const cls = g.ok === false ? "warn" : g.ok === true ? "ok" : "";
     return `<span class="pill ${cls}">${esc(g.name)} ${esc(g.status)}</span>`;
   };
   const gates = state.gates || [];
@@ -1316,6 +1315,5 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
 </script>
 </body></html>`;
 
-  const gate = !gates.length ? "none" : gates.some((g) => g.ok === false) ? "warn" : "ok";
-  return { html, done, total: steps.length, openQuestions: unanswered.length, gate, findings: findings.length };
+  return { html, done, total: steps.length, openQuestions: unanswered.length, gate: gateSummary(gates), findings: findings.length };
 }

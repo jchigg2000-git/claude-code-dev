@@ -123,6 +123,47 @@ test("await and answers --new keep the session's own record", async () => {
   assert.match(ctx(sb.hook("user-prompt", { session_id: "s7" })), /"teal"/);
 });
 
+// Seven questions, one answer each, in order: a block shows five, so two have to wait their turn.
+async function answerSeven(sb) {
+  const ids = ["q1", "q2", "q3", "q4", "q5", "q6", "q7"];
+  for (const id of ids) sb.cli(["ask", "--id", id, "--question", `Pick ${id}?`, "--recommend", "x", "--rationale", "y"]);
+  for (const id of ids) await sb.pageAnswer(id, `answer-${id}`);
+  return ids;
+}
+const answered = (text) => [...text.matchAll(/"answer-(q\d)"/g)].map((m) => m[1]);
+
+test("answers --new drains a long queue across pulls: every answer shown once, none consumed unseen", async () => {
+  const sb = setup();
+  const ids = await answerSeven(sb);
+  const first = sb.cli(["answers", "--new"]);
+  assert.deepEqual(answered(first), ids.slice(0, 5));
+  assert.match(first, /and 2 more, not yet delivered: run \S+\/bin\/build-status answers --new/);
+  assert.deepEqual(answered(sb.cli(["answers", "--new"])), ids.slice(5));
+  assert.match(sb.cli(["answers", "--new"]), /no new answers/);
+  // An edit after its first version went out is delivered again, labelled updated.
+  await sb.pageAnswer("q2", "answer-q2-revised");
+  assert.match(sb.cli(["answers", "--new"]), /- q2 .*\[updated\][\s\S]*"answer-q2-revised"/);
+  // --json prints and marks the whole collection.
+  const other = setup();
+  await answerSeven(other);
+  assert.equal(JSON.parse(other.cli(["answers", "--new", "--json"])).length, 7);
+  assert.match(other.cli(["answers", "--new"]), /no new answers/);
+});
+
+test("a hook marks seen only the answers its block shows", async () => {
+  const sb = setup();
+  sb.hook("session-start", { session_id: "s9" });
+  const ids = await answerSeven(sb);
+  assert.deepEqual(answered(ctx(sb.hook("user-prompt", { session_id: "s9" }))), ids.slice(0, 5));
+  assert.deepEqual(answered(ctx(sb.hook("user-prompt", { session_id: "s9" }))), ids.slice(5));
+  assert.equal(sb.hook("user-prompt", { session_id: "s9" }), null);
+  // A new session's start block is capped too; what it couldn't show is still there to pull.
+  const late = setup();
+  await answerSeven(late);
+  assert.deepEqual(answered(ctx(late.hook("session-start", { session_id: "s10" }))), ids.slice(0, 5));
+  assert.deepEqual(answered(late.cli(["answers", "--new"])), ids.slice(5));
+});
+
 test("a repo with no state file gets nothing written by the hooks", () => {
   const sb = sandbox();
   sandboxes.push(sb);

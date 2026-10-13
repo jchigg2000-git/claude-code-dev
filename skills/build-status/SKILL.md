@@ -99,8 +99,10 @@ Detect, first match wins, and record every result with `bs gate <name> "<status>
 
 Typecheck/lint/vet run on every invocation that re-checks gates; the **test** gate only with
 `--gates` (or once during an attended Bootstrap, with consent). Status is the tool's own short
-words — `"clean"`, `"3 problems"`, `"112 passed, 1 skipped"`; the page colours it by keyword. A
-state file that keeps gates as a `gate` object belongs to the repo's own tooling; `bs gate`
+words — `"clean"`, `"3 problems"`, `"112 passed, 1 skipped"`; the page colours it by keyword. The
+summary's `gate:` is `ok` only when every gate reads as passed, `warn` when any failed, `unknown`
+when one wasn't run or its words aren't recognised (`"not run"`, `"skipped"`), and `none` with no
+gates. A state file that keeps gates as a `gate` object belongs to the repo's own tooling; `bs gate`
 refuses to write it, so leave it.
 
 ## 5. What to record, and when
@@ -151,8 +153,10 @@ worked, plus a count of the settled ones.
 
 **Waiting on an answer**: run `bs await <qid> --timeout 4h` with the Bash tool's
 `run_in_background` — it exits 0 with the answer quoted (the harness wakes you) or 2 on timeout.
-A loop that never gets a prompt pulls with `bs answers --new`. Delivered answers are quoted from
-the file, not confirmed in chat — act on them per the repo's rules.
+A loop that never gets a prompt pulls with `bs answers --new`. A block shows at most five answers
+and marks only those delivered; when it ends "and N more, not yet delivered", pull again until it
+says `no new answers` (`--json` returns them all at once). Delivered answers are quoted from the
+file, not confirmed in chat — act on them per the repo's rules.
 
 **Comments from the owner.** The page's Overview has a comment box with a priority. A comment
 lands in `comments[]` as `new`, and @keeper (or the main session, when no keeper runs) decides
@@ -163,8 +167,12 @@ priority sets how soon it arrives and how much weight it carries:
 |---|---|---|
 | low | held, then passed on with other comments when a step ends (within 4 h at most) | the keeper may route it alone: suggest it for the backlog, or settle a page/bookkeeping one itself |
 | normal | at the next natural break (a step done, a merge or commit on main, the main session messaging the keeper), within 1 h | the main session: do it now if it's small and in scope, file it in the backlog, or decline with a reason |
-| high | at the keeper's next pass (≤10 min), even mid-step | the main session weighs it before starting its next piece of work and says what it will do |
-| urgent | at once | the main session stops at the next safe point (never leaving a broken tree) and deals with it first; if it disagrees, it asks the owner a red question rather than carry on |
+| high | at the keeper's next pass (≤10 min while it runs on a timer), even mid-step | the main session weighs it before starting its next piece of work and says what it will do |
+| urgent | as soon as a watcher sees it: seconds while `bs comments --wait` is running in the background, otherwise at the next pass or message, like high | the main session stops at the next safe point (never leaving a broken tree) and deals with it first; if it disagrees, it asks the owner a red question rather than carry on |
+
+These times hold only while something is watching (§8, "How fast it hears"); with no keeper, no
+watcher and no timer, every comment waits until the main session next checks `bs comments --open`.
+Never tell the owner a comment arrived sooner than that.
 
 Comments due at the same moment go as one message. Record each move, and the note is what the owner
 reads on the page: `bs comment-status <cid> held --note "until the CarPlay fix lands"`, then `sent`,
@@ -206,35 +214,48 @@ owner asks for "@keeper"), keep one **sonnet** agent on the page for the rest of
 **@keeper** (the owner addresses it that way; relay any "@keeper …" message to it with SendMessage).
 Reuse the running one; spawn one only if none exists. It counts toward the session's agent cap.
 
-Brief it with this section, plus the repo's `locate --json` result. @keeper:
+Brief it with this section, plus the repo's `locate --json` result.
+
+**Its job is the books.** Four duties, ahead of anything else it does:
 - **Records** through the CLI verbs only (§5): every merge, measured result, owner answer acted on
   and decision, when it happens. The main session messages it at each such event; on every pass it
   also compares `git log` since its last pass with the findings and records what is missing.
-- **Keeps the file and the page in sync:** after every change to the state file (its own, the main
-  session's, or the owner's answers from the page), it renders — `bs render`, or for a
-  `repo-generator` the repo's own generator — so the HTML never lags the JSON.
-- **Keeps every open question recommended:** on every pass, each open question needs a
-  recommendation and a rationale (§5). For any that lacks one, it asks the main session for both
+- **Keeps the page current:** after every change to the state file (its own, the main session's,
+  or the owner's answers from the page), it renders — `bs render`, or for a `repo-generator` the
+  repo's own generator — so the HTML never lags the JSON. On every pass, each open question needs
+  a recommendation and a rationale (§5); for any that lacks one, it asks the main session for both
   and records the reply with `bs recommend <qid> "..." --rationale "..."`. In a `repo-generator`
   repo, its own generator shows both, with the Accept button, and has a test for it.
-- **Relays owner answers:** new answers in `questions` go to the main session (SendMessage to
-  "main") with the id and the answer verbatim; the main session acts on them per the repo's rules,
-  without waiting for the owner to confirm. When it reports the work done, @keeper records
-  `bs acted <qid> --note "..."`. On every pass it also checks answered questions not yet settled
-  against `git log` and the findings, marks the finished ones acted on, and asks the main session
-  about any it can't tell.
-- **Paces the owner's comments** (§5): on every pass, and whenever `bs comments --wait` wakes it, it
-  triages each `new` comment, holds or sends it as its priority says, quotes it verbatim, and
-  records every move with `bs comment-status` and the main session's reply as the note. In a
-  `repo-generator` repo, its own generator gets the same box, priority, endpoint and statuses,
-  reading the same `comments` fields, with a test.
-- **Owns how new things are shown.** When the build produces a new kind of result the page has no
-  home for (a regression-gate series, per-class scores, a backlog, a model comparison), @keeper adds
-  a small view for it — in a `repo-generator` repo's own generator, with a test, committed by path —
-  and asks before restructuring the page, removing content, or changing how answers and
-  confirming work. It asks the lead bookkeeper, or the main session when no lead is running.
-  In a `generic` repo it proposes the view instead (the CLI is shared across repos, so it is not
-  edited from one session).
+- **Relays the owner's answers and comments** to the main session (SendMessage to "main"), each
+  quoted verbatim with its id. New answers go on its next pass; the main session acts on them per
+  the repo's rules, without waiting for the owner to confirm. Comments are paced (§5): on every
+  pass, and whenever `bs comments --wait` wakes it, it triages each `new` one and holds or sends
+  it as its priority says. In a `repo-generator` repo, its own generator gets the same comment
+  box, priority, endpoint and statuses, reading the same `comments` fields, with a test.
+- **Tracks what became of them.** When the main session reports an answer's work done, @keeper
+  records `bs acted <qid> --note "..."`; every move of a comment goes on record with
+  `bs comment-status`, the main session's reply as the note. On every pass it also checks answered
+  questions not yet settled against `git log` and the findings, marks the finished ones acted on,
+  and asks the main session about any it can't tell.
+
+**Recorded, delivered, acted on** are three stages; never report one as another. An answer or
+comment is *recorded* once it's in the state file — all the page's Save or Send confirms. It's
+*delivered* once the main session has it: @keeper's message, a hook, `bs answers --new` or
+`bs await`. It's *acted on* once the main session reports the work done and @keeper records
+`acted`, or `done`, `filed` or `declined`. A comment's status and an answer's acted note are how
+the owner sees which stage it reached.
+
+**How fast it hears.** Nothing pushes a comment into a session by itself. @keeper keeps
+`bs comments --wait` running with `run_in_background` and starts it again each time it exits, so a
+new comment wakes it within seconds — for as long as that watcher runs and the harness delivers
+the wakeup. Between wakeups it runs a pass about every 10 minutes if its tools allow a timer;
+otherwise it passes only when the main session messages it, and every window in §5's table
+stretches to that. Its message reaches the main session when the harness delivers it, not before;
+urgent means the main session stops at the next safe point after reading it. If @keeper can't keep
+a watcher or a timer going, it says so in one line to the lead (or the main session), so no one
+tells the owner a comment will arrive sooner than it can.
+
+**Who it answers to.**
 - **Reports to the lead bookkeeper only** (`/lead-keeper`), a session outside every build that
   coordinates the keepers. The session's name is in `~/.build-status/lead/lead.txt`. While
   ListAgents shows that session, @keeper sends it by SendMessage everything it would otherwise
@@ -246,23 +267,31 @@ Brief it with this section, plus the repo's `locate --json` result. @keeper:
   that exists, and follows the orders marked `(all)` or with its repo's name. It also follows any
   the lead sends it later. Orders let it act without asking anyone, but they stop at the Never
   list below, and the owner and the repo's own rules overrule them.
-- **Stays on the books.** It doesn't leave bookkeeping to do the main session's work, with two
-  exceptions. One is a build clearly running on its own (`locate --json` says `attended: false`,
-  or the build is under /loop or /unleash). The other is work that fits between passes and costs
-  less done by @keeper, whose context is already warm, than by a new agent. Either way, the work
-  must be the kind the tier map gives sonnet. While it helps, it brings the books current at
-  least once a minute (records what happened, renders), so the page is never more than a minute
-  behind. It tells the lead in one line what it took on.
-- **Never** commits the state file (the main session does), re-serializes it outside the verbs
-  except as §5 allows (Node `JSON.stringify(s, null, 2) + "\n"` or Python with
-  `ensure_ascii=False`), or starts/stops a page server other than the documented way.
-- Between messages it runs a pass about every 10 minutes if its tools allow a timer; otherwise it
-  passes whenever the main session messages it.
+
+**Never** commits the state file (the main session does), re-serializes it outside the verbs
+except as §5 allows (Node `JSON.stringify(s, null, 2) + "\n"` or Python with
+`ensure_ascii=False`), or starts/stops a page server other than the documented way.
+
+**Beyond the books** — second to the four duties, and never at their expense:
+- **Owns how new things are shown.** When the build produces a new kind of result the page has no
+  home for (a regression-gate series, per-class scores, a backlog, a model comparison), @keeper adds
+  a small view for it — in a `repo-generator` repo's own generator, with a test, committed by path —
+  and asks before restructuring the page, removing content, or changing how answers and
+  confirming work. It asks the lead bookkeeper, or the main session when no lead is running.
+  In a `generic` repo it proposes the view instead (the CLI is shared across repos, so it is not
+  edited from one session).
+- **Helps with the build only by exception.** It doesn't leave bookkeeping to do the main
+  session's work, with two exceptions. One is a build clearly running on its own (`locate --json`
+  says `attended: false`, or the build is under /loop or /unleash). The other is work that fits
+  between passes and costs less done by @keeper, whose context is already warm, than by a new
+  agent. Either way, the work must be the kind the tier map gives sonnet. While it helps, it brings
+  the books current at least once a minute (records what happened, renders), so the page is never
+  more than a minute behind. It tells the lead in one line what it took on.
 
 ## 9. Report — short
 
 ```
-<repo> — <done>/<N> steps, gate: <ok|warn|none>, <M> findings, <Q> open questions
+<repo> — <done>/<N> steps, gate: <ok|warn|unknown|none>, <M> findings, <Q> open questions
 <what changed: written | updated | unchanged>  →  <URL, or "already open, refreshes in ≤20s">
 ```
 
