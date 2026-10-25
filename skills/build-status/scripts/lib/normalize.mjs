@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 
 const KNOWN = new Set([
   "repo", "phase", "serverPort", "history", "updated", "steps", "gates", "gate",
-  "measures", "findings", "note", "questions", "comments",
+  "measures", "findings", "note", "questions", "comments", "rewrites", "roadmapRequests",
 ]);
 
 // true passed, false failed, null not run or not recognised. "ok" is a whole word ("broken" isn't
@@ -44,11 +44,30 @@ export function normalizeGates(raw) {
 // has acted on it. Ratify was retired on 2026-10-09, when the owner said it had read as a go-ahead
 // rather than a done: a ratification from before that day settles; one from that day on doesn't.
 export const RATIFY_RETIRED = "2026-10-09";
+// An owner-started topic (`origin: "owner"`) has no answer to give: it settles once the owner
+// closes it (confirmed) or the build has acted on it.
 export const isSettled = (q) =>
   Boolean(
-    q && q.answer != null && String(q.answer).trim() &&
-      (q.confirmed || q.actedAt || (q.ratified && String(q.ratifiedAt ?? "").slice(0, 10) < RATIFY_RETIRED)),
+    q &&
+      (isOwnerTopic(q)
+        ? q.confirmed || q.actedAt
+        : q.answer != null && String(q.answer).trim() &&
+          (q.confirmed || q.actedAt || (q.ratified && String(q.ratifiedAt ?? "").slice(0, 10) < RATIFY_RETIRED))),
   );
+
+// Threaded Q/A. A question may carry `thread[]` of {id, from: "owner"|"agent", text, at, via?}:
+// the conversation around it. The `answer` stays the owner's decision; a file without `thread`
+// reads as an empty one. An owner topic is a question the owner started from the page.
+export const isOwnerTopic = (q) => Boolean(q && q.origin === "owner");
+export const threadOf = (q) =>
+  (Array.isArray(q?.thread) ? q.thread : []).filter((m) => m && typeof m === "object" && typeof m.text === "string" && (m.from === "owner" || m.from === "agent"));
+// Open for the owner to answer: an agent-asked question with no answer yet. Owner topics wait on
+// the build, not the owner, so they never count here.
+export const isOpenQuestion = (q) => Boolean(q) && !isOwnerTopic(q) && (q.answer == null || String(q.answer).trim() === "");
+
+// How long an Improve/Enrich request may sit pending before watchers stop waking on it and the page
+// says the keeper never took it up.
+export const REWRITE_STALE_MS = 30 * 60 * 1000;
 
 export const plainFindingId = (text) => "s_" + createHash("sha1").update(String(text)).digest("hex").slice(0, 12);
 
@@ -74,6 +93,9 @@ export function normalize(raw) {
     ).filter(Boolean),
     questions: arr(s.questions).filter((q) => q && typeof q === "object"),
     comments: arr(s.comments).filter((c) => c && typeof c === "object" && typeof c.text === "string"),
+    rewrites: arr(s.rewrites).filter((r) => r && typeof r === "object" && typeof r.text === "string"),
+    // The page's requests about ROADMAP.md (write.mjs); each object is kept whole, unknown keys too.
+    roadmapRequests: arr(s.roadmapRequests).filter((r) => r && typeof r === "object" && typeof r.id === "string" && typeof r.kind === "string"),
     extra,
   };
 }

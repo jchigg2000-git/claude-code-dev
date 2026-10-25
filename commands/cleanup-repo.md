@@ -2,6 +2,8 @@
 description: Read-only repo audit for stale/orphaned files, tracked cruft, accidentally-committed secrets, empty files, and gitignore gaps — produces a risk-tiered cleanup plan with evidence per finding (.claude/plans/cleanup-<ts>.md) for a downstream executor agent. Never deletes, modifies, stages, or commits anything. Fire on `/cleanup-repo` or "plan a repo cleanup / audit the repo for stale files."
 argument-hint: "[optional scope path, defaults to repo root]"
 allowed-tools: Bash(git:*), Bash(rg:*), Bash(find:*), Bash(wc:*), Bash(stat:*), Bash(file:*), Bash(mkdir:*), Bash(date:*), Read, Glob, Grep, Write
+context: fork
+background: false
 ---
 
 # Repo Hygiene Audit → Cleanup Plan

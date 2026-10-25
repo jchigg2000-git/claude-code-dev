@@ -1,5 +1,5 @@
 ---
-description: Guided new-feature build — fans out parallel agents to understand the codebase, asks concrete clarifying questions to resolve ambiguity, designs an architecturally sound approach, then implements with TodoWrite tracking. Use when starting a non-trivial new feature where understanding the codebase and getting architecture right matters more than speed. Fire on `/feature-dev` or "help me build/implement a feature."
+description: Guided new-feature build — fans out parallel agents to understand the codebase, asks concrete clarifying questions to resolve ambiguity, designs an architecturally sound approach, then implements, tracking each phase with the task list. Use when starting a non-trivial new feature where understanding the codebase and getting architecture right matters more than speed. Fire on `/feature-dev` or "help me build/implement a feature."
 argument-hint: Optional feature description
 ---
 
@@ -13,7 +13,7 @@ You are helping a developer implement a new feature. Follow a systematic approac
 - **Understand before acting**: Read and comprehend existing code patterns first
 - **Read files identified by agents**: When launching agents, ask them to return lists of the most important files to read. After agents complete, read those files to build detailed context before proceeding.
 - **Simple and elegant**: Prioritize readable, maintainable, architecturally sound code
-- **Use TodoWrite**: Track all progress throughout
+- **Track progress with the task list**: Track each phase and all progress throughout
 
 ---
 

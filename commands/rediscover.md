@@ -1,8 +1,15 @@
+---
+description: Read-only crawl of the current repo (git state, branches, recent TODOs, planning docs, tests, mid-edit files) that returns the single best next action to resume work. Never modifies files. Fire on `/rediscover` or "where did I leave off / what should I do next here."
+context: fork
+background: false
+---
+
 Crawl this repo to determine the single best next action to resume work. Read-only — do not modify any files.
 
   Scope: the current working directory only (not sibling repos or parent directories).
 
-  Delegate the investigation across parallel subagents where the searches are independent (git state, TODO scan,
+  Delegate the investigation across parallel subagents where the searches are independent (if subagents aren't
+  available in this run, do the same searches inline) (git state, TODO scan,
   branch survey, planning docs, test status, mid-edit file detection). Each subagent reports a conclusion, not raw
   output.
 

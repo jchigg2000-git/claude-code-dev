@@ -70,6 +70,7 @@ Other content discovered in Phase 1: implement per the schema you proposed and I
 ## Phase 5 — Output
 - Print top 30 skills by `evidence_count` and top 10 impact entries by recency.
 - Write a `report.md` next to the DB with skills grouped by category and impact entries listed reverse-chronologically.
+- **Coverage — cloud sessions don't land here.** Sessions started in the iOS app, on claude.ai or from another cloud session never reach `~/.claude/projects/` unless teleported. Add one **coverage** line to the report saying which sessions it could see (local transcripts, vault, or both) and that cloud sessions are absent. When this runs inside a cloud session, read cloud transcripts with the remote session tools (`list_sessions`, `list_events`) if they're available. Where the owner has pasted `/insights` output, cross-check session totals against it.
 
 ## Constraints
 - **Local-only.** No network calls during extraction.

@@ -11,13 +11,43 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, renameSync, statSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { ensureDir, git, homePath, listWorktrees, loadConfig, repoKey } from "./paths.mjs";
-import { isSettled } from "./normalize.mjs";
+import { isOwnerTopic, isSettled, threadOf } from "./normalize.mjs";
 import { loadState, locate } from "./state.mjs";
 
 const MAX_ITEMS = 5;
 const MAX_ANSWER = 600; // characters of one answer shown in a block; the file has the rest
 const clip = (t) => (t.length > MAX_ANSWER ? `${t.slice(0, MAX_ANSWER)}… (truncated; the state file has it all)` : t);
 const versionOf = (q) => createHash("sha1").update(`${q.answer}\n${q.answeredAt}`).digest("hex").slice(0, 16);
+// A thread message is delivered once, like an answer; its ledger key is qid#msgId so it never
+// stands in for the question's answer when deciding what counts as "updated".
+const msgVersion = (q, m) => createHash("sha1").update(`thread\n${q.id}\n${m.id}\n${m.text}\n${m.at}`).digest("hex").slice(0, 16);
+const ledgerKey = (item) => item.key ?? item.qid;
+
+// The owner's messages on a question's thread, as delivery items: the opening message of an
+// owner topic is a new topic, every other owner message a reply. Agent messages are never
+// delivered (the session wrote them).
+export function threadItems(q, checkout) {
+  const topic = isOwnerTopic(q);
+  return threadOf(q)
+    .map((m, i) => ({ m, i }))
+    .filter(({ m }) => m.from === "owner")
+    .map(({ m, i }) => ({
+      kind: topic && i === 0 ? "topic" : "reply",
+      qid: String(q.id),
+      msgId: String(m.id ?? i + 1),
+      key: `${q.id}#${m.id ?? i + 1}`,
+      question: q.question ?? "",
+      severity: q.severity ?? "",
+      answer: m.text,
+      answeredAt: m.at ?? null,
+      answeredVia: m.via ?? null,
+      answerQuote: null,
+      edited: false,
+      settled: isSettled(q),
+      version: msgVersion(q, m),
+      checkouts: [checkout],
+    }));
+}
 const ms = (iso) => {
   const t = Date.parse(iso);
   return Number.isNaN(t) ? null : t;
@@ -51,11 +81,16 @@ export async function collectAnswers(co) {
       continue;
     }
     for (const q of state.questions) {
+      for (const item of threadItems(q, wt)) {
+        const hit = byVersion.get(`${item.key}:${item.version}`);
+        if (hit) hit.checkouts.push(wt);
+        else byVersion.set(`${item.key}:${item.version}`, item);
+      }
       if (q.answer == null || String(q.answer).trim() === "") continue;
       const version = versionOf(q);
       const hit = byVersion.get(`${q.id}:${version}`);
       if (hit) hit.checkouts.push(wt);
-      else byVersion.set(`${q.id}:${version}`, { qid: String(q.id), question: q.question ?? "", severity: q.severity ?? "", answer: String(q.answer), answeredAt: q.answeredAt ?? null, answeredVia: q.answeredVia ?? null, answerQuote: q.answerQuote ?? null, edited: Boolean(q.editedAt), settled: isSettled(q), version, checkouts: [wt] });
+      else byVersion.set(`${q.id}:${version}`, { kind: "answer", qid: String(q.id), question: q.question ?? "", severity: q.severity ?? "", answer: String(q.answer), answeredAt: q.answeredAt ?? null, answeredVia: q.answeredVia ?? null, answerQuote: q.answerQuote ?? null, edited: Boolean(q.editedAt), settled: isSettled(q), version, checkouts: [wt] });
     }
   }
   return [...byVersion.values()].sort((a, b) => (ms(a.answeredAt) ?? 0) - (ms(b.answeredAt) ?? 0));
@@ -83,13 +118,26 @@ export function formatBlock(co, items, { updated = new Set() } = {}) {
     const branch = git(wt, ["rev-parse", "--abbrev-ref", "HEAD"]);
     return `checkout ${basename(wt)}${branch ? `, ${branch}` : ""}${item.checkouts.length > 1 ? ` +${item.checkouts.length - 1} more` : ""}`;
   };
-  const lines = [`build-status: the state file records ${items.length} new answer${items.length === 1 ? "" : "s"} in ${repo}.`];
+  const talk = items.some((i) => i.kind === "reply" || i.kind === "topic");
+  const what = talk ? `new answer${items.length === 1 ? "" : "s"}, replies or topics` : `new answer${items.length === 1 ? "" : "s"}`;
+  const lines = [`build-status: the state file records ${items.length} ${what} in ${repo}.`];
   for (const item of shown) {
+    if (item.kind === "topic") {
+      lines.push(`- ${item.qid} [new topic] — ${where(item)}`);
+      lines.push(`  Owner's message (${via(item)}, ${hhmm(item.answeredAt)}): "${clip(item.answer)}"`);
+      continue;
+    }
+    if (item.kind === "reply") {
+      lines.push(`- ${item.qid} [reply] "${item.question}" — ${where(item)}`);
+      lines.push(`  Owner's reply (${via(item)}, ${hhmm(item.answeredAt)}): "${clip(item.answer)}"`);
+      continue;
+    }
     lines.push(`- ${item.qid}${item.severity ? ` (${item.severity})` : ""}${updated.has(item.qid) ? " [updated]" : ""} "${item.question}" — ${where(item)}`);
     lines.push(`  Recorded answer (${via(item)}${item.edited ? ", edited" : ""}, ${hhmm(item.answeredAt)}): "${clip(item.answer)}"`);
   }
   if (items.length > shown.length) lines.push(`and ${items.length - shown.length} more, not yet delivered: run ${bs} answers --new`);
   lines.push(`Quoted from the file, not said in this chat. Act on it now, per your repo's rules: it needs no confirming first. Once it's done, ${bs} acted <id> --note '<what was done>' lets the page hide it.`);
+  if (talk) lines.push(`Reply on the page's Q&A tab with ${bs} reply <id> --text-file - (the text on stdin); ${bs} thread <id> shows the whole conversation.`);
   lines.push("Context for this session's own next step — not a new task for any agent it is running.");
   return { text: lines.join("\n"), shown };
 }
@@ -108,7 +156,7 @@ export function loadLedgers(co, sessionId) {
 // Which of these answers replace a version some session was already given ("updated").
 export function updatedIn(co, items) {
   const { delivered } = loadLedgers(co, null);
-  return new Set(items.filter((i) => delivered.latest[i.qid] && delivered.latest[i.qid] !== i.version).map((i) => i.qid));
+  return new Set(items.filter((i) => delivered.latest[ledgerKey(i)] && delivered.latest[ledgerKey(i)] !== i.version).map((i) => i.qid));
 }
 
 // Mark items as reached (any session) and, with a session, seen by it. Returns which qids had
@@ -118,10 +166,10 @@ export function markDelivered(co, items, sessionId, session) {
   const { delivered } = loadLedgers(co, null);
   const updated = new Set();
   for (const item of items) {
-    const prev = delivered.latest[item.qid];
+    const prev = delivered.latest[ledgerKey(item)];
     if (prev && prev !== item.version) updated.add(item.qid);
     delivered.versions[item.version] = now;
-    delivered.latest[item.qid] = item.version;
+    delivered.latest[ledgerKey(item)] = item.version;
   }
   writeJson(deliveredPath(co), delivered);
   if (sessionId) {
@@ -191,8 +239,8 @@ export async function answersCommand(co, loc, { onlyNew = false, json = false } 
   }
   const items = (await collectAnswers(co)).reverse().slice(0, 20);
   if (json) console.log(JSON.stringify(items, null, 2));
-  else if (!items.length) console.log("no answered questions");
-  else for (const i of items) console.log(`${i.answeredAt ?? "?"}  ${i.qid}  (${via(i)}${i.edited ? ", edited" : ""}${i.settled ? ", settled" : ""})  "${i.answer}"`);
+  else if (!items.length) console.log("no answered questions or owner messages");
+  else for (const i of items) console.log(`${i.answeredAt ?? "?"}  ${i.qid}${i.kind === "topic" ? " [new topic]" : i.kind === "reply" ? " [reply]" : ""}  (${via(i)}${i.edited ? ", edited" : ""}${i.settled ? ", settled" : ""})  "${i.answer}"`);
   return 0;
 }
 
@@ -204,29 +252,40 @@ export function parseDuration(s) {
 
 // `await QID`: run with the Bash tool's run_in_background; the harness wakes the session when it
 // exits. Watches the state file (fs.watch, plus a 2 s poll in case a watch event is missed).
+//
+// It exits with the answer as before. With a thread it also exits on any owner message not yet
+// delivered, and once the thread's last word is the agent's (the build replied and is waiting),
+// an answer that was already delivered no longer counts: it waits for the owner's next message
+// or a changed answer. An owner topic has no answer, so only a message ends the wait.
 export async function awaitAnswer(co, loc, qid, timeoutMs) {
   const check = async () => {
     try {
       const { state } = await loadState(loc.statePath);
       const q = state.questions.find((x) => String(x.id) === String(qid));
       if (!q) return { missing: true };
-      return q.answer != null && String(q.answer).trim() ? { q } : {};
+      const { delivered } = loadLedgers(co, null);
+      const fresh = threadItems(q, co.root).filter((i) => !delivered.versions[i.version]);
+      const hasAnswer = q.answer != null && String(q.answer).trim() !== "";
+      const answerItem = hasAnswer ? { kind: "answer", qid: String(q.id), question: q.question ?? "", severity: q.severity ?? "", answer: String(q.answer), answeredAt: q.answeredAt, answeredVia: q.answeredVia, edited: Boolean(q.editedAt), settled: isSettled(q), version: versionOf(q), checkouts: [co.root] } : null;
+      const waitingOnOwner = threadOf(q).at(-1)?.from === "agent";
+      const answerDue = answerItem && (!waitingOnOwner || !delivered.versions[answerItem.version]);
+      const items = [...(answerDue ? [answerItem] : []), ...fresh];
+      return items.length ? { items } : {};
     } catch {
       return {};
     }
   };
-  const report = (q) => {
-    const item = { qid: String(q.id), question: q.question ?? "", severity: q.severity ?? "", answer: String(q.answer), answeredAt: q.answeredAt, answeredVia: q.answeredVia, edited: Boolean(q.editedAt), settled: isSettled(q), version: versionOf(q), checkouts: [co.root] };
-    console.log(formatBlock(co, [item], { updated: updatedIn(co, [item]) }).text);
-    markDelivered(co, [item], process.env.CLAUDE_CODE_SESSION_ID, null);
+  const report = (items) => {
+    console.log(formatBlock(co, items, { updated: updatedIn(co, items) }).text);
+    markDelivered(co, items.slice(0, MAX_ITEMS), process.env.CLAUDE_CODE_SESSION_ID, null);
   };
   const first = await check();
   if (first.missing) {
     console.error(`build-status: no question with id "${qid}"`);
     return 3;
   }
-  if (first.q) {
-    report(first.q);
+  if (first.items) {
+    report(first.items);
     return 0;
   }
   return new Promise((resolve) => {
@@ -245,8 +304,8 @@ export async function awaitAnswer(co, loc, qid, timeoutMs) {
     const tick = async () => {
       const r = await check();
       if (done) return;
-      if (r.q) {
-        report(r.q);
+      if (r.items) {
+        report(r.items);
         finish(0);
       }
     };
@@ -255,7 +314,7 @@ export async function awaitAnswer(co, loc, qid, timeoutMs) {
     } catch {}
     const poll = setInterval(tick, 2000);
     const timer = setTimeout(() => {
-      console.log(`build-status: no answer to "${qid}" yet (timed out)`);
+      console.log(`build-status: no answer or reply on "${qid}" yet (timed out)`);
       finish(2);
     }, timeoutMs);
   });

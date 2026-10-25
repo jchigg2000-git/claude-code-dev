@@ -16,6 +16,7 @@ import { openSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { PING_PATH } from "./daemon.mjs";
 import { buildId, checkoutFile, CLI_PATH, ensureDir, homePath, loadConfig, realpathSafe } from "./paths.mjs";
+import { isOpenQuestion } from "./normalize.mjs";
 import { loadState, locate } from "./state.mjs";
 import { withLock } from "./write.mjs";
 
@@ -204,7 +205,7 @@ export async function listCheckouts() {
     }
     let openQuestions = 0;
     try {
-      openQuestions = (await loadState(entry.statePath)).state.questions.filter((q) => q.answer == null).length;
+      openQuestions = (await loadState(entry.statePath)).state.questions.filter(isOpenQuestion).length;
     } catch {}
     out.push({ root: entry.root, url: `http://127.0.0.1:${entry.port}/`, port: entry.port, pid: entry.pid, openQuestions });
   }

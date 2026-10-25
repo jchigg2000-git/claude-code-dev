@@ -33,10 +33,6 @@ carries, which are content, not plan items.
   gate's `SOURCE_ROOTS`: a change there is a sync of content authored in `~/.claude/`, not a
   unit of work this file tracks, and including them would fire the gate on every
   `/sync-claude-slash --ship`. Revisit only if the mirror starts carrying original work.
-- ⬜ **MIRROR-8 `doc-consolidation` held out.** `usage_gate.py` reads the Claude Code OAuth token
-  from the macOS Keychain to call the undocumented `api.anthropic.com/api/oauth/usage` endpoint.
-  Rework that before the skill can be mirrored; until then every sync offers it again.
-
 ### Parked ideas
 None.
 
@@ -64,6 +60,15 @@ to prove the install path. If PLUG-1 moves files, PLUG-4 has to land first.
   - Accept when a clean account (the second Claude account works) installs `harden` and
     `machine-health` from the marketplace and both run, including `harden-for-deploy` reaching
     its steps.
+  - 2.1.310 facts (checked 2026-10-25 against the changelog, not yet tried here): a marketplace
+    `command` source with `mode: "link"` uses the plugin in place (2.1.229), and
+    `--plugin-dir <folder>` loads every plugin in a folder and picks up edits (2.1.265). Both
+    weaken §2's "live edits mean reinstalling" objection. `claude plugin eval` (2.1.269) can be
+    the scored acceptance test, and `claude plugin details <name>` shows each plugin's projected
+    token cost.
+  - Plugins enabled only in user settings, or declared in a repo's `.claude/settings.json`, don't
+    load in cloud sessions. `/cloud-plugins` decides whether `claude --cloud` sessions started
+    from this Mac carry them.
   - Anything newly public gets a human brand-scrub read. The automated scrub gate has no pattern
     file and no callers, so never cite it as proof of clean.
 - ⬜ **PLUG-2 Grouping** `CLAUDE-ORIGIN` (proposed in a ~/Projects session 2026-09-26, not
@@ -89,8 +94,6 @@ to prove the install path. If PLUG-1 moves files, PLUG-4 has to land first.
     `pack-toolbag`, `sync-claude-slash`, `harness-audit`, `harvestccskills`,
     `stash`/`unstash`, `unleash`, `doc-consolidation` (tied to the owner's LaunchAgent and
     purgatory dir), `build-status`, `mcp-servers/loose-ends`.
-  - **Fix before publishing:** `rediscover` has no frontmatter at all (`commands/rediscover.md`
-    starts with prose). Add a `description:` block.
 - ⬜ **PLUG-4 Gate + tooling follow-through — only if PLUG-1 moves files.**
   `scripts/provenance-gate.py` scans only `commands/` and `skills/`, so a `plugins/**` layout
   silently escapes all three of its layers. This must land before or with PLUG-1, never after.
@@ -107,9 +110,54 @@ to prove the install path. If PLUG-1 moves files, PLUG-4 has to land first.
   `skills/ux-tournament` already does this and is the pattern to copy (`<skill dir>/...`).
 - ⬜ **PLUG-7 Local-install rule.** Never install these plugins on the primary machine
   alongside the loose `~/.claude/` copies, or every skill fires twice. The second account
-  installs from the marketplace.
+  installs from the marketplace. If `mode: "link"` or `--plugin-dir` (PLUG-1) replaces the loose
+  copies on this Mac instead of sitting beside them, re-decide this rule.
 
 ### Parked ideas (§2)
 - **PLUG-8 Reach.** Installable isn't discoverable. Look into a listing in
   `anthropics/claude-plugins-official` (submission process not yet checked) and link the
   marketplace from the jchdev essays.
+
+## §3 Harness follow-ups (2.1.310 update, 2026-10-25)
+
+All `CLAUDE-ORIGIN`: proposed by the 2.1.310 harness-update handoff, not yet decided by the owner.
+
+- ⬜ **HARN-1 Fork `pathfinder` and `gen-sys-doc`?** `CLAUDE-ORIGIN`. Five read-only reports
+  now run with `context: fork` + `background: false` (`rediscover`, `cleanup-repo`,
+  `diagramsystemflow`, `audit-burden`, `port-collision-scan`). These two were held back because
+  they spawn subagents (pathfinder's parallel investigations, gen-sys-doc's refuter), and it is
+  unconfirmed whether a forked run can. Fork them only after confirming it can.
+- ⬜ **HARN-2 Sweeps on a schedule** `CLAUDE-ORIGIN`. Desktop scheduled tasks run on the Mac,
+  load `~/.claude/skills/` and can use a fresh worktree per run; they fit the `~/Projects`
+  walkers (`wip-reconciler`, `autonomous-doc-refresh`, `test-backfill`) and could replace the
+  launchd jobs (`doc-hygiene-sweep`, `sysdoc-staleness`). Cloud scheduled tasks (`/schedule`)
+  run with the Mac off but see only attached repos and not `~/.claude`; they fit report-only
+  sweeps over a fixed repo list (`security-sweep`, `license-compliance`, `deadlink-check`,
+  `config-drift`, `deploy-health`) and need the cloud setup script or account skills to find
+  the skill. Spike `wip-reconciler` locally and `deadlink-check` in the cloud. A scheduled
+  sweep's output is its report; the never-commit rule holds.
+- ⬜ **HARN-3 `build-status` readable from the phone** `CLAUDE-ORIGIN`. The page is served on
+  the Mac's localhost. Spike a private Artifact copy first (the phone can open it); a Claude Mod
+  pane (2.1.287, `plugin-authoring`) is the other route.
+- ⬜ **HARN-4 Background sessions instead of orphaned `claude -p`** `CLAUDE-ORIGIN`.
+  `machine-health`'s watchdog kills orphaned headless runs. Check whether the launchd jobs that
+  spawn `claude -p` should move to `claude --bg` (`claude agents` can attach, log, stop and
+  respawn them).
+- ⬜ **HARN-5 Commands → skills** `CLAUDE-ORIGIN`. The 2.1.310 loader labels
+  `~/.claude/commands/` a deprecated source; only skills get `paths`, a supporting-files folder
+  and live reload. Migrating ~45 files touches `sync-claude-slash`, the provenance allowlist and
+  `gen-readme.py`, so plan it as one change.
+- ⬜ **HARN-6 Recurring inventory prompt as a skill** `CLAUDE-ORIGIN`. A long versioned prompt
+  that re-inventories the local projects gets re-pasted regularly. Draft it with `skill-creator`
+  (with an eval), run its fan-out as a Workflow so the subagent cap queues instead of failing, and
+  consider a Desktop scheduled task since it reads local folders.
+- ⬜ **HARN-7 `prompt-improver` explicit-only?** `CLAUDE-ORIGIN`. Its description fires it on
+  every standalone prompt, but in practice it's started by hand. If `/skill-doctor` shows the
+  description costing context in every session, `disable-model-invocation: true` with sentinels
+  kept matches that use. Owner's call; it reverses the standing "fire aggressively" decision.
+- ⬜ **HARN-8 Account skills for cloud** `CLAUDE-ORIGIN`. Skills enabled on the claude.ai
+  account load in cloud sessions, cloud scheduled tasks and Cowork, and sync into terminal
+  sessions under `~/.claude/skills/synced/`. The upload accepts only Agent Skills spec fields
+  (`name`, `description`, `license`, `compatibility`, `metadata`, `allowed-tools`); a file with
+  `argument-hint`, `context` or `disable-model-invocation` fails with "Unexpected key(s)". Use it
+  only for a few skills wanted everywhere, with trimmed frontmatter.

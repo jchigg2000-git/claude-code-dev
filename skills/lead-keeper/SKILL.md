@@ -23,8 +23,11 @@ that is not a build, and it stays the lead for the rest of the session.
 3. Match each live build to a peer session whose name contains the repo name. If a match is
    unclear, ask the owner; never guess. Sessions rename themselves, so once a build is matched,
    address its session by its `[ref]` (`name [ref]`, with the name as currently listed).
-4. Show the roster, one line per build: `repo · session · done/total · open questions · last
-   activity`. Show the builds with no session as well: nobody is there to talk to.
+4. Show the roster, one line per build: `repo · session · done/total · open questions ·
+   awaiting reply · last activity`. Open questions wait on the owner; owner topics never count
+   there. `awaitingReply` lists Q&A threads whose last word is the owner's, waiting on the build.
+   Show the builds with no session as well: nobody is there to talk to. The owner's own view of
+   every background session on the Mac is `claude agents` (filter with `n:<text>`).
 
 ## 2. Talking to keepers
 
@@ -48,7 +51,9 @@ bookkeeping only (§3); never another build's own work.
 
 The build's main session relays it to its @keeper. Replies arrive here. Show the owner the ones
 that answer the owner's question, with the build named and in the keeper's words. Don't
-paraphrase them into agreement.
+paraphrase them into agreement. When the message carries an owner question, send it with
+`notify_when_idle: true`: one idle notice arrives when that build's session next goes idle, so a
+silent build shows up without re-running the snapshot or asking "are you done?".
 
 Keepers report to the lead only (build-status §8): proposals, questions about their page, work
 they took on for their build, and the one-line note each sends when it takes up bookkeeping with

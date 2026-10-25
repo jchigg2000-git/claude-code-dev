@@ -32,5 +32,15 @@ class StreamedUsage(unittest.TestCase):
             self.assertEqual(row["input"], 20)
 
 
+class CurrentModelRates(unittest.TestCase):
+    def test_sonnet_5_5_and_haiku_5_5_have_their_own_rows(self):
+        sys.path.insert(0, HERE)
+        import cost
+        # Sonnet 5.5 must not fall through to the claude-sonnet-5 prefix ($0.20 cache reads).
+        self.assertEqual(cost.rate_for("claude-sonnet-5-5"), (2.0, 10.0, 0.10, 2.5, 4.0))
+        self.assertEqual(cost.rate_for("claude-haiku-5-5"), (0.10, 0.50, 0.01, 0.125, 0.20))
+        self.assertEqual(cost.rate_for("claude-sonnet-5")[2], 0.20)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,7 +3,7 @@
 //
 // The front door is checked before anything else, on every route: a Host
 // other than 127.0.0.1:<port> or localhost:<port> is refused (DNS rebinding), a preflight gets
-// 405, and no CORS header is ever sent. /answer and /comment also need an Origin that is this
+// 405, and no CORS header is ever sent. /answer, /comment, /rewrite, /reply, /topic and /roadmap/* also need an Origin that is this
 // page's own and a JSON body under 64 KB — measured on the old daemon, a cross-site text/plain POST wrote a
 // forged answer and a 50 MB body went straight into the state file.
 //
@@ -13,9 +13,10 @@
 import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { gzipSync } from "node:zlib";
-import { renderPage } from "./page.mjs";
+import { renderPage, roadmapOverlay } from "./page.mjs";
+import { roadmapPath, roadmapView } from "./roadmap.mjs";
 import { buildId, checkoutFile, ensureDir, homePath, localIso, resolveCheckout } from "./paths.mjs";
-import { locate } from "./state.mjs";
+import { loadState, locate } from "./state.mjs";
 import * as W from "./write.mjs";
 
 export const PING_PATH = "/__build-status-ping";
@@ -82,7 +83,7 @@ export async function runDaemon({ root, key, port = 0 }) {
   const json = (res, status, obj, headers = {}) => send(res, status, JSON.stringify(obj), { "content-type": "application/json", ...headers });
 
   async function page(req, res) {
-    const k = fileKey(loc.statePath);
+    const k = `${fileKey(loc.statePath)}|${fileKey(roadmapPath(co.root)?.path ?? "")}`;
     let html;
     let stale = false;
     if (cache && cache.key === k && Date.now() - cache.at < 2000) html = cache.html;
@@ -160,6 +161,33 @@ export async function runDaemon({ root, key, port = 0 }) {
     }
   }
 
+  // The comment box's Improve/Enrich ({text, mode}) queues the draft for the keeper; Use this or
+  // Dismiss ({id, close: true}) closes the offer.
+  async function rewrite(req, res) {
+    const got = await readPost(req, res);
+    if (!got) return;
+    const msg = got.msg;
+    const id = typeof msg?.id === "string" ? msg.id : null;
+    const close = msg?.close === true && id;
+    const hasText = typeof msg?.text === "string" && msg.text.trim().length > 0;
+    if (!close && !(hasText && typeof msg?.mode === "string")) return json(res, 400, { ok: false, error: "text and mode (improve or enrich), or id and close: true, required" });
+    try {
+      const r = await W.mutate(
+        co,
+        loc.statePath,
+        (raw) => (close ? W.closeRewrite(raw, id) : W.requestRewrite(raw, { text: msg.text, mode: msg.mode })),
+        { waitMs: 2000, who: "daemon" },
+      );
+      cache = null;
+      return json(res, 200, { ok: true, id: r.id });
+    } catch (err) {
+      if (err.code === "LOCK_TIMEOUT") return json(res, 503, { ok: false, error: "busy, try again" });
+      if (err.code === "CONFLICT") return json(res, /^no rewrite/.test(err.message) ? 404 : 400, { ok: false, error: err.message });
+      if (err.code === "UNPARSEABLE") return json(res, 503, { ok: false, error: "the state file doesn't parse right now; try again" });
+      throw err;
+    }
+  }
+
   async function answer(req, res) {
     const got = await readPost(req, res);
     if (!got) return;
@@ -191,6 +219,74 @@ export async function runDaemon({ root, key, port = 0 }) {
     }
   }
 
+  // The owner's side of a thread: a reply on a question ({id, text}) or a new topic from the
+  // "Ask the build" box ({text}). Same front door, lock and atomic write as answers.
+  async function thread(req, res, kind) {
+    const got = await readPost(req, res);
+    if (!got) return;
+    const msg = got.msg;
+    const text = typeof msg?.text === "string" ? msg.text : "";
+    const id = typeof msg?.id === "string" ? msg.id : null;
+    if (!text.trim() || (kind === "reply" && !id)) return json(res, 400, { ok: false, error: kind === "reply" ? "id and a non-empty text required" : "a non-empty text required" });
+    try {
+      const r = await W.mutate(
+        co,
+        loc.statePath,
+        (raw) => (kind === "reply" ? W.addThreadMessage(raw, id, { from: "owner", text, via: "page" }) : W.addOwnerTopic(raw, { text, via: "page" })),
+        { waitMs: 2000, who: "daemon" },
+      );
+      cache = null;
+      return json(res, 200, { ok: true, id: r.id, msgId: r.msgId });
+    } catch (err) {
+      if (err.code === "LOCK_TIMEOUT") return json(res, 503, { ok: false, error: "busy, try again" });
+      if (err.code === "CONFLICT") return json(res, /^no question/.test(err.message) ? 404 : 400, { ok: false, error: err.message });
+      if (err.code === "UNPARSEABLE") return json(res, 503, { ok: false, error: "the state file doesn't parse right now; try again" });
+      throw err;
+    }
+  }
+
+  // The Roadmap tab: the owner's requests about ROADMAP.md. These only ever write the state file;
+  // ROADMAP.md is read, never written (the main session carries a request out).
+  async function roadmapJson(res) {
+    try {
+      const { state } = await loadState(loc.statePath);
+      return json(res, 200, { view: roadmapOverlay(co.root, state.roadmapRequests), requests: state.roadmapRequests });
+    } catch (err) {
+      if (err.code === "UNPARSEABLE") return json(res, 503, { ok: false, error: "the state file doesn't parse right now; try again" });
+      throw err;
+    }
+  }
+
+  async function roadmapPost(req, res, action) {
+    const got = await readPost(req, res);
+    if (!got) return;
+    const msg = got.msg && typeof got.msg === "object" ? got.msg : {};
+    if (action === "withdraw" && typeof msg.id !== "string") return json(res, 400, { ok: false, error: "id required" });
+    if (action === "request" && (typeof msg.kind !== "string" || typeof msg.itemId !== "string")) return json(res, 400, { ok: false, error: "kind and itemId required" });
+    const view = action === "request" ? roadmapView(co.root) : null;
+    try {
+      const r = await W.mutate(
+        co,
+        loc.statePath,
+        (raw) =>
+          action === "withdraw"
+            ? W.withdrawRoadmapRequest(raw, msg.id)
+            : W.addRoadmapRequest(raw, { kind: msg.kind, itemId: msg.itemId, to: msg.to, dispatch: msg.dispatch, via: "page" }, view),
+        { waitMs: 2000, who: "daemon" },
+      );
+      cache = null;
+      return json(res, 200, { ok: true, request: r.request });
+    } catch (err) {
+      if (err.code === "LOCK_TIMEOUT") return json(res, 503, { ok: false, error: "busy, try again" });
+      if (err.code === "CONFLICT") {
+        const status = /^no roadmap request/.test(err.message) ? 404 : action === "withdraw" ? 409 : 400;
+        return json(res, status, { ok: false, error: err.message });
+      }
+      if (err.code === "UNPARSEABLE") return json(res, 503, { ok: false, error: "the state file doesn't parse right now; try again" });
+      throw err;
+    }
+  }
+
   async function handle(req, res) {
     if (!hosts().has(String(req.headers.host || "").toLowerCase())) return json(res, 421, { ok: false, error: "misdirected request" });
     if (req.method === "OPTIONS") return json(res, 405, { ok: false, error: "method not allowed" }, { allow: "GET, POST" });
@@ -206,6 +302,22 @@ export async function runDaemon({ root, key, port = 0 }) {
     if (path === "/comment") {
       if (req.method !== "POST") return json(res, 405, { ok: false, error: "method not allowed" }, { allow: "POST" });
       return comment(req, res);
+    }
+    if (path === "/rewrite") {
+      if (req.method !== "POST") return json(res, 405, { ok: false, error: "method not allowed" }, { allow: "POST" });
+      return rewrite(req, res);
+    }
+    if (path === "/reply" || path === "/topic") {
+      if (req.method !== "POST") return json(res, 405, { ok: false, error: "method not allowed" }, { allow: "POST" });
+      return thread(req, res, path.slice(1));
+    }
+    if (path === "/roadmap.json") {
+      if (req.method !== "GET") return json(res, 405, { ok: false, error: "method not allowed" }, { allow: "GET" });
+      return roadmapJson(res);
+    }
+    if (path === "/roadmap/request" || path === "/roadmap/withdraw") {
+      if (req.method !== "POST") return json(res, 405, { ok: false, error: "method not allowed" }, { allow: "POST" });
+      return roadmapPost(req, res, path.slice("/roadmap/".length));
     }
     return json(res, 404, { ok: false, error: "not found" });
   }

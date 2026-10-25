@@ -65,6 +65,7 @@ skills/build-status/hooks/hooks.stop.json
 skills/build-status/install.mjs
 skills/build-status/scripts/cli.mjs
 skills/build-status/scripts/lib/answers.mjs
+skills/build-status/scripts/lib/app.mjs
 skills/build-status/scripts/lib/daemon.mjs
 skills/build-status/scripts/lib/git.mjs
 skills/build-status/scripts/lib/hooks.mjs
@@ -72,15 +73,21 @@ skills/build-status/scripts/lib/normalize.mjs
 skills/build-status/scripts/lib/page.mjs
 skills/build-status/scripts/lib/paths.mjs
 skills/build-status/scripts/lib/render.mjs
+skills/build-status/scripts/lib/roadmap.mjs
 skills/build-status/scripts/lib/serve.mjs
 skills/build-status/scripts/lib/state.mjs
 skills/build-status/scripts/lib/write.mjs
 skills/build-status/test/answers.test.mjs
+skills/build-status/test/app.test.mjs
 skills/build-status/test/core.test.mjs
 skills/build-status/test/daemon.test.mjs
 skills/build-status/test/helpers.mjs
 skills/build-status/test/install.test.mjs
+skills/build-status/test/render-roadmap.test.mjs
 skills/build-status/test/render.test.mjs
+skills/build-status/test/rewrites.test.mjs
+skills/build-status/test/roadmap.test.mjs
+skills/build-status/test/threads.test.mjs
 skills/changelog-refresh/SKILL.md
 skills/config-drift/SKILL.md
 skills/deadlink-check/SKILL.md
@@ -92,6 +99,7 @@ skills/enrich-document/assets/template.html
 skills/enrich-document/references/canonical-links.json
 skills/enrich-document/references/prompt-actions.md
 skills/enrich-document/scripts/assemble_html.py
+skills/fold-features/SKILL.md
 skills/lead-keeper/SKILL.md
 skills/lead-keeper/scripts/snapshot.mjs
 skills/lead-keeper/test/snapshot.test.mjs
@@ -146,4 +154,5 @@ skills/ux-tournament/scripts/render.sh
 skills/ux-tournament/scripts/test-gate.mjs
 skills/ux-tournament/scripts/test_cost.py
 skills/ux-tournament/workflow.mjs
+skills/verify/SKILL.md
 skills/wip-reconciler/SKILL.md

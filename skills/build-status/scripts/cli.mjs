@@ -8,7 +8,7 @@
 import { readFileSync, writeSync } from "node:fs";
 import { join, relative } from "node:path";
 import { buildId, git, localDate, resolveCheckout, SCRIPTS_DIR } from "./lib/paths.mjs";
-import { gateSummary } from "./lib/normalize.mjs";
+import { gateSummary, isOpenQuestion, isOwnerTopic, threadOf } from "./lib/normalize.mjs";
 import { isAttended, loadState, locate } from "./lib/state.mjs";
 import * as W from "./lib/write.mjs";
 
@@ -20,7 +20,9 @@ Record (each is one locked, atomic, id-patched write):
   recommend QID TEXT [--rationale TEXT]  (the answer the page offers as "Accept recommendation", and why;
                      recommend QID "" removes both)
   answer QID --via chat --quote TEXT | --quote-file F   (F = - reads stdin; the owner's words, verbatim)
-  acted QID [--note TEXT]       (the build acted on the answer; the page hides the question)
+  acted QID [--note TEXT]       (the build acted on the answer, or on an owner topic; the page hides it)
+  reply QID [TEXT | --text TEXT | --text-file F]
+                     (an agent message on the question's Q&A thread; F = - reads stdin)
   step done MATCH | step set MATCH todo|active|done | step add NAME [--state S] | step rename MATCH --name NAME
   note TEXT          (note "" clears it)
   phase TEXT         next-phase LABEL [--force]
@@ -31,13 +33,28 @@ Record (each is one locked, atomic, id-patched write):
                      (an owner comment given in chat, verbatim; the page's comment box posts its own)
   comment-status CID held|sent|filed|done|declined [--note TEXT]
                      (what became of a comment; the page shows the note; declined needs one)
+  rewrite RID [TEXT | --text-file F] | rewrite RID --fail TEXT
+                     (your Improve/Enrich of the owner's draft from the comment box; the page offers it)
+  roadmap-request reorder|remove|restore|dispatch ITEMID [--after ID] [--before ID]
+                  [--opus 0|1] [--sonnet 0|1] [--brief TEXT | --brief-file F]
+                     (an owner's roadmap request given in chat; ROADMAP.md itself is never written)
+  roadmap-status RID held|sent|filed|done|declined [--note TEXT]
+                     (what became of a roadmap request; declined needs a note)
 
 Read and wait:
   locate [--json]    which state file, whose page, attended or not
-  answers [--new] [--json]      --new: undelivered answers, at most 5 per pull (the rest wait for the next); --json: all
-  await QID [--timeout 4h]      exit 0 with the answer, 2 on timeout
+  answers [--new] [--json]      --new: undelivered answers, owner replies and new owner topics, at most 5
+                                per pull (the rest wait for the next); --json: all
+  await QID [--timeout 4h]      exit 0 with the answer or an undelivered owner reply, 2 on timeout;
+                                after your own reply it waits for the owner's next message
+  thread QID [--json]           the question, its answer and its conversation, oldest first
   comments [--open] [--json]    the owner's comments, open ones first (open = new, held, sent)
-  comments --wait [--timeout 4h]  exit 0 listing the comments waiting for triage (status new), 2 on timeout
+  comments --wait [--timeout 4h]  exit 0 listing the comments waiting for triage (status new) and any
+                                pending Improve/Enrich request, 2 on timeout
+  rewrites [--open] [--json]    the comment box's Improve/Enrich requests (open = pending, done, failed)
+  roadmap [--json]   ROADMAP.md's sections and items, with the open roadmap requests laid over them
+  roadmap-requests [--open] [--json]   the page's roadmap requests (open = new, held, sent, filed)
+  roadmap-requests --wait [--timeout 4h]  exit 0 listing the requests with status new, 2 on timeout
   status [--json]    gate: ok (every gate passed) | warn (one failed) | unknown (one not run or unrecognised) | none
 
 Page:
@@ -200,6 +217,14 @@ async function main() {
       await write((raw) => W.setAnswer(raw, qid, { answer: flags.quote, via: "chat", quote: flags.quote }), (r) => `answer to "${r.id}" (via chat)`);
       return;
     }
+    case "reply": {
+      const [qid, ...words] = pos;
+      let text = flags.text ?? words.join(" ");
+      if (flags["text-file"]) text = readFileSync(flags["text-file"] === "-" ? 0 : flags["text-file"], "utf8");
+      if (!qid || !String(text).trim()) fail(1, "reply QID TEXT (or --text TEXT, or --text-file F, - for stdin)");
+      await write((raw) => W.addThreadMessage(raw, qid, { from: "agent", text, via: "cli" }), (r) => `reply ${r.msgId} on "${r.id}"`);
+      return;
+    }
     case "acted": {
       const [qid] = pos;
       if (!qid) fail(1, "acted QID [--note TEXT]");
@@ -246,6 +271,31 @@ async function main() {
       await write((raw) => W.addComment(raw, { text, priority, via: "chat" }), (r) => `comment "${r.id}" (${priority})`);
       return;
     }
+    case "rewrite": {
+      const [rid, ...rest] = pos;
+      const result = flags["text-file"] ? readFileSync(flags["text-file"] === "-" ? 0 : flags["text-file"], "utf8").trim() : rest.join(" ").trim();
+      if (!rid || (flags.fail == null && !result)) fail(1, "rewrite RID [TEXT | --text-file F] | rewrite RID --fail TEXT");
+      await write((raw) => W.setRewrite(raw, rid, flags.fail != null ? { fail: flags.fail } : { result }), (r) => `rewrite "${r.id}" ${flags.fail != null ? "failed" : "done"}`);
+      return;
+    }
+    case "roadmap-request": {
+      const [kind, itemId] = pos;
+      if (!kind || !itemId) fail(1, "roadmap-request reorder|remove|restore|dispatch ITEMID [--after ID] [--before ID] [--opus N] [--sonnet N] [--brief TEXT]");
+      const { roadmapView } = await import("./lib/roadmap.mjs");
+      const view = roadmapView(co.root);
+      let brief = flags.brief;
+      if (flags["brief-file"]) brief = readFileSync(flags["brief-file"] === "-" ? 0 : flags["brief-file"], "utf8");
+      const to = kind === "reorder" ? { after: flags.after ?? null, before: flags.before ?? null } : undefined;
+      const dispatch = kind === "dispatch" ? { opus: flags.opus ?? 0, sonnet: flags.sonnet ?? 0, brief: brief ?? "" } : undefined;
+      await write((raw) => W.addRoadmapRequest(raw, { kind, itemId, to, dispatch, via: "chat" }, view), (r) => `roadmap request "${r.id}" (${kind} ${itemId})`);
+      return;
+    }
+    case "roadmap-status": {
+      const [rid, status] = pos;
+      if (!rid || !status) fail(1, "roadmap-status RID held|sent|filed|done|declined [--note TEXT]");
+      await write((raw) => W.setRoadmapRequestStatus(raw, rid, status, flags.note), (r) => `roadmap request "${r.id}" ${status}`);
+      return;
+    }
     case "comment-status": {
       const [cid, status] = pos;
       if (!cid || !status) fail(1, "comment-status CID held|sent|filed|done|declined [--note TEXT]");
@@ -264,7 +314,7 @@ async function main() {
         fail(EXIT[err.code] ?? 1, err.message);
       }
       const done = st.steps.filter((s) => s.state === "done").length;
-      const open = st.questions.filter((q) => q.answer == null).length;
+      const open = st.questions.filter(isOpenQuestion).length;
       const gate = gateSummary(st.gates);
       const summary = { root: co.root, statePath: loc.statePath, phase: st.phase, done, steps: st.steps.length, gate, findings: st.findings.length, openQuestions: open, draft: Boolean(st.extra.draft) };
       if (flags.json) return console.log(JSON.stringify(summary, null, 2));
@@ -273,9 +323,12 @@ async function main() {
     }
     case "comments": {
       const RANK = { urgent: 4, high: 3, normal: 2, low: 1 };
+      let rewritesSeen = [];
       const read = async () => {
         try {
-          return (await loadState(loc.statePath)).state.comments;
+          const st = (await loadState(loc.statePath)).state;
+          if (flags.wait) rewritesSeen = st.rewrites.filter((r) => W.isLiveRewrite(r));
+          return st.comments;
         } catch (err) {
           if (flags.wait) return null; // a write in flight; the next poll reads it
           fail(EXIT[err.code] ?? 1, err.message);
@@ -298,7 +351,11 @@ async function main() {
         const end = Date.now() + parseDuration(flags.timeout ?? "4h");
         for (;;) {
           const fresh = ((await read()) ?? []).filter((c) => (c.status ?? "new") === "new").sort(order);
-          if (fresh.length) return show(fresh);
+          if (fresh.length || rewritesSeen.length) {
+            if (fresh.length || !flags.json) show(fresh);
+            for (const r of rewritesSeen) console.log(`${r.id}  [${r.mode}] rewrite pending  ${r.at ?? "?"}  "${r.text}"`);
+            return;
+          }
           if (Date.now() >= end) {
             console.log("build-status: no new comment yet (timed out)");
             process.exitCode = 2;
@@ -309,6 +366,111 @@ async function main() {
       }
       const all = (await read()).slice().sort(order);
       return show(flags.open ? all.filter((c) => W.COMMENT_OPEN.has(c.status ?? "new")) : all);
+    }
+    case "roadmap": {
+      let st;
+      try {
+        ({ state: st } = await loadState(loc.statePath));
+      } catch (err) {
+        fail(EXIT[err.code] ?? 1, err.message);
+      }
+      const { roadmapOverlay } = await import("./lib/page.mjs");
+      const view = roadmapOverlay(co.root, st.roadmapRequests);
+      const open = st.roadmapRequests.filter((r) => W.ROADMAP_REQ_OPEN.has(r.status ?? "new"));
+      if (flags.json) return console.log(JSON.stringify({ view, requests: open }, null, 2));
+      if (view.error) fail(3, view.error);
+      const byId = new Map(open.map((r) => [r.id, r]));
+      console.log(`${view.source}: ${view.sections.reduce((n, s) => n + s.items.length, 0)} items in ${view.sections.length} sections, ${open.length} open requests`);
+      for (const s of view.sections) {
+        if (!s.items.length) continue;
+        console.log(`\n${s.title || "(untitled)"}${s.backlog ? "  [backlog]" : ""}`);
+        for (const i of s.items) {
+          const tags = [i.removed ? "REMOVE requested" : "", i.movedByRequest ? "moved" : "", ...i.pending.map((p) => `${p.id} ${p.kind} ${p.status}`)].filter(Boolean);
+          console.log(`  ${i.marker || "·"} ${i.id}  ${i.title}${i.backlog && !s.backlog ? "  [backlog]" : ""}${tags.length ? `  {${tags.join("; ")}}` : ""}`);
+        }
+      }
+      if (view.unmatched.length) console.log(`\nrequests naming items no longer in ${view.source}: ${view.unmatched.map((id) => `${id} (${byId.get(id)?.itemId})`).join(", ")}`);
+      return;
+    }
+    case "roadmap-requests": {
+      const read = async () => {
+        try {
+          return (await loadState(loc.statePath)).state.roadmapRequests;
+        } catch (err) {
+          if (flags.wait) return null;
+          fail(EXIT[err.code] ?? 1, err.message);
+        }
+      };
+      const line = (r) => {
+        const what =
+          r.kind === "reorder" ? ` → ${r.to?.after ? `after ${r.to.after}` : r.to?.before ? `before ${r.to.before}` : "top of its section"}`
+          : r.kind === "dispatch" ? ` — opus ${r.dispatch?.opus ?? 0}, sonnet ${r.dispatch?.sonnet ?? 0}${r.dispatch?.brief ? `; brief: "${r.dispatch.brief}"` : ""}`
+          : "";
+        return `${r.id}  ${r.status ?? "new"}  ${r.at ?? "?"}  ${r.kind} ${r.itemId} "${r.itemTitle ?? ""}"${what}${r.via === "chat" ? " (via chat)" : ""}${r.note ? `\n      note: ${r.note}` : ""}`;
+      };
+      const show = (list, empty) => {
+        if (flags.json) return console.log(JSON.stringify(list, null, 2));
+        if (!list.length) return console.log(empty);
+        for (const r of list) console.log(line(r));
+      };
+      if (flags.wait) {
+        const { parseDuration } = await import("./lib/answers.mjs");
+        const end = Date.now() + parseDuration(flags.timeout ?? "4h");
+        for (;;) {
+          const fresh = ((await read()) ?? []).filter((r) => (r.status ?? "new") === "new");
+          if (fresh.length) return show(fresh, "");
+          if (Date.now() >= end) {
+            console.log("build-status: no new roadmap request yet (timed out)");
+            process.exitCode = 2;
+            return;
+          }
+          await new Promise((r) => setTimeout(r, Math.min(2000, Math.max(0, end - Date.now()))));
+        }
+      }
+      const all = await read();
+      return show(flags.open ? all.filter((r) => W.ROADMAP_REQ_OPEN.has(r.status ?? "new")) : all, flags.open ? "no open roadmap requests" : "no roadmap requests");
+    }
+    case "rewrites": {
+      let st;
+      try {
+        ({ state: st } = await loadState(loc.statePath));
+      } catch (err) {
+        fail(EXIT[err.code] ?? 1, err.message);
+      }
+      const list = flags.open ? st.rewrites.filter((r) => r.status !== "closed") : st.rewrites;
+      if (flags.json) return console.log(JSON.stringify(list, null, 2));
+      if (!list.length) return console.log(flags.open ? "no open rewrites" : "no rewrites");
+      for (const r of list) {
+        const stale = r.status === "pending" && !W.isLiveRewrite(r) ? " (stale)" : "";
+        console.log(`${r.id}  [${r.mode}] ${r.status}${stale}  ${r.at ?? "?"}  "${r.text}"`);
+        if (r.note) console.log(`      note: ${r.note}`);
+      }
+      return;
+    }
+    case "thread": {
+      const [qid] = pos;
+      if (!qid) fail(1, "thread QID [--json]");
+      let st;
+      try {
+        ({ state: st } = await loadState(loc.statePath));
+      } catch (err) {
+        fail(EXIT[err.code] ?? 1, err.message);
+      }
+      const q = st.questions.find((x) => String(x.id) === String(qid));
+      if (!q) fail(EXIT.CONFLICT, `no question with id "${qid}"`);
+      const thread = threadOf(q);
+      if (flags.json) {
+        const { id, question, origin, severity, recommendation, rationale, answer, answeredAt, answeredVia, confirmed, actedAt, actedNote } = q;
+        return console.log(JSON.stringify({ id, question, origin: origin ?? "agent", severity, recommendation, rationale, answer, answeredAt, answeredVia, confirmed, actedAt, actedNote, thread }, null, 2));
+      }
+      const topic = isOwnerTopic(q);
+      console.log(`${q.id}${topic ? " [owner topic]" : q.severity ? ` (${q.severity})` : ""}  "${q.question ?? ""}"`);
+      if (!topic && q.recommendation) console.log(`  recommended: ${q.recommendation}`);
+      if (!topic) console.log(q.answer != null && String(q.answer).trim() ? `  answer (${q.answeredVia ?? "file"}, ${q.answeredAt ?? "?"}): ${q.answer}` : "  answer: none yet");
+      if (q.confirmed || q.actedAt) console.log(`  settled: ${q.confirmed ? "confirmed by the owner" : `acted on${q.actedNote ? ` (${q.actedNote})` : ""}`}`);
+      if (!thread.length) console.log("  no conversation yet");
+      for (const m of thread) console.log(`  ${m.at ?? "?"}  ${m.from}${m.via ? ` (${m.via})` : ""}: ${m.text.replace(/\n/g, "\n    ")}`);
+      return;
     }
     case "answers": {
       const { answersCommand } = await import("./lib/answers.mjs");

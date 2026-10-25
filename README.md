@@ -49,6 +49,7 @@ Grouped by what you'd use it for. Commands and skills both run as `/name`.
 - [Hand a repo to another team](#hand-a-repo-to-another-team) (2)
 - [Your Claude setup](#your-claude-setup) (7)
 - [MCP servers](#mcp-servers) (2)
+- [Not yet summarized](#not-yet-summarized) (2)
 
 ### Ship and save work
 
@@ -204,6 +205,15 @@ Small local servers that give Claude extra tools. Setup is in [mcp-servers/READM
 |---|---|---|
 | [`port-registry`](mcp-servers/port-registry/) | MCP server | Hands each new project a free network port and records it, so two local apps never fight over one. |
 | [`loose-ends`](mcp-servers/loose-ends/) | MCP server | Gives Claude a quick digest of what's unfinished in a repo: uncommitted work, TODOs, stale docs, open backlog items. |
+
+### Not yet summarized
+
+New arrivals with no plain summary in `docs/readme-catalog.json` yet; the text is the first sentence of the description Claude reads.
+
+| Name | Kind | What it does |
+|---|---|---|
+| [`fold-features`](skills/fold-features/SKILL.md) | skill | Apply the feature-fold scout's newest report to the live harness. |
+| [`verify`](skills/verify/SKILL.md) | skill | Run this repo's own fast checks (lint, typecheck, unit tests) and stop on red. |
 <!-- END:catalog -->
 
 ## Conventions

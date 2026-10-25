@@ -1,5 +1,5 @@
 ---
-description: Run the full deployment-hardening series (secrets → auth → deps → licenses → config → lint → tests → observability) in order. Stops on CRITICAL from secrets/auth/licenses; otherwise runs through and produces a single consolidated HARDENING_REPORT.md. Never auto-pushes, auto-publishes, or auto-deploys. Fire on `/harden-for-deploy` or "is this safe to deploy?"
+description: Run the full deployment-hardening series (secrets → auth → deps → licenses → config → lint → tests → observability → review) in order. Stops on CRITICAL from secrets/auth/licenses; otherwise runs through and produces a single consolidated HARDENING_REPORT.md. Never auto-pushes, auto-publishes, or auto-deploys. Fire on `/harden-for-deploy` or "is this safe to deploy?"
 argument-hint: "[--fix] [--verify] [--skip <step,...>] [--only <step,...>] [scope path]"
 allowed-tools: Bash(git:*), Bash(date:*), Bash(mkdir:*), Bash(rg:*), Bash(find:*), Bash(cat:*), Read, Glob, Grep, Write
 ---
@@ -17,7 +17,7 @@ Parse flags:
 - `--only <step,...>` → run ONLY named steps (e.g., `--only secrets,auth`)
 - remaining positional → scope path passed to every step
 
-Valid step names: `secrets`, `auth`, `deps`, `licenses`, `config`, `lint`, `tests`, `observability`
+Valid step names: `secrets`, `auth`, `deps`, `licenses`, `config`, `lint`, `tests`, `observability`, `review`
 
 ---
 
@@ -49,7 +49,7 @@ Harden: Deploy
 Targets:    [npm-publish] [railway] [public-git | private-git]
 Visibility: public | PRIVATE   (gh/glab verified | assumed — could not check)
 Scan tools: gitleaks/trufflehog/govulncheck present? lint toolchain executable? (note any missing → degraded coverage)
-Steps:      secrets → auth → deps → licenses → config → lint → tests → observability
+Steps:      secrets → auth → deps → licenses → config → lint → tests → observability → review
 Fix:        off  (or: on)
 Skipped:    <steps if any>
 ```
@@ -60,7 +60,9 @@ Skipped:    <steps if any>
 
 Execute each step by invoking the corresponding slash command. Steps run sequentially. Per-step plan files land in `.claude/plans/` as normal.
 
-**Default step order:** secrets → auth → deps → licenses → config → lint → tests → observability
+**Default step order:** secrets → auth → deps → licenses → config → lint → tests → observability → review
+
+**Step 9 — `review` (built-in reviewers).** Run `/security-review` on the pending changes, then `/code-review high` on the same diff (`/code-review high --max-findings all` when this is a first public release). Neither writes a plan file: save their findings to `.claude/plans/harden-review-<ts>.md` yourself. If there is no pending diff (clean tree), record "Review: no pending diff" and don't count it as a skipped step. `/ultrareview` (cloud multi-agent review that verifies each bug; shows its USD cost before starting) is an option for a release branch; name it in the report, never run it from here. `--fix` doesn't propagate to this step.
 
 `lint` runs before `tests` on purpose: static analysis is cheap and fails fast, so a repo that can't pass its own declared lint gate surfaces that before the test suite spends minutes proving it.
 
@@ -87,7 +89,7 @@ After `/harden-auth`:
 After `/harden-licenses`:
 - If any CRITICAL found (AGPL in runtime of permissive repo, copyleft in proprietary repo): stop with same pattern.
 
-Other steps (deps, config, lint, tests, observability): never halt on their findings — collect and bubble to consolidated report. Note that `harden-lint` CAN emit a CRITICAL (a security-rule injection sink in shipped code): it does not halt the run, but it is never "continued past" either, so it lands in the stop-the-line list and forces a RED decision.
+Other steps (deps, config, lint, tests, observability, review): never halt on their findings — collect and bubble to consolidated report. Note that `harden-lint` CAN emit a CRITICAL (a security-rule injection sink in shipped code): it does not halt the run, but it is never "continued past" either, so it lands in the stop-the-line list and forces a RED decision.
 
 **Conditional CRITICAL** — a finding that is HIGH normally but becomes CRITICAL under a specific, *verifiable* deploy condition (e.g. "a dev/test auth endpoint is exposed UNLESS the prod env disables it"; "debug mode on UNLESS an env var is set"). Do not silently bury these as plain HIGH:
 1. **If the deciding fact is checkable now, check it.** For a Railway target, query the live env (presence only — see below) before finalizing severity. Verifying usually collapses the ambiguity — a flagged bypass is often inert in prod once you confirm the gating var.
@@ -115,6 +117,7 @@ CONFIG=$(ls -t .claude/plans/harden-config-*.md 2>/dev/null | head -1)
 LINT=$(ls -t .claude/plans/harden-lint-*.md 2>/dev/null | head -1)
 TESTS=$(ls -t .claude/plans/harden-tests-*.md 2>/dev/null | head -1)
 OBS=$(ls -t .claude/plans/harden-observability-*.md 2>/dev/null | head -1)
+REVIEW=$(ls -t .claude/plans/harden-review-*.md 2>/dev/null | head -1)
 ```
 
 **Reconcile before stitching.** The same root issue routinely surfaces in multiple steps at different severities (e.g. missing LICENSE flagged by both licenses and config; missing healthcheck rated HIGH by config but MEDIUM by observability; an auth bypass that also appears as an observability log-leak; a lint `security/detect-child-process` hit on the same line `harden-secrets` or `harden-auth` already flagged — keep the higher severity, and keep the lint hit as corroborating evidence in the cluster note rather than as a second finding). Before writing the report:
@@ -219,6 +222,12 @@ Write consolidated report with this structure:
 ## 8. Observability
 
 <verbatim content from harden-observability plan file>
+
+---
+
+## 9. Built-in review
+
+<findings from /security-review and /code-review, from harden-review-<ts>.md>
 ```
 
 **Deploy decision logic** (computed on the DE-DUPLICATED finding set):
@@ -260,3 +269,4 @@ Closes the loop a normal run opens. Skip the full series. Load the newest `.clau
 
 <!-- CLAUDE-ORIGIN (2026-07-30, agent-authored): the lint step's placement at position 6, its non-halting-but-RED-forcing CRITICAL handling, and the extension of the scan-confidence YELLOW cap to cover a DEGRADED lint run are model-authored. The operator asked only that linting be added "where it belongs"; the placement and the gating semantics are inference. Re-derive before citing them as binding. -->
 
+<!-- CLAUDE-ORIGIN (2026-10-25, agent-authored): step 9 `review` (built-in /security-review + /code-review high, non-halting, excluded from --fix, clean tree not counted as skipped) was added from the 2.1.310 harness-update handoff on the owner's approval. Its placement and gating are inference. -->

@@ -1,6 +1,8 @@
 ---
 description: Read-only forensic analysis of this repo — trace system flows from entry points (HTTP routes, CLI, jobs, consumers) through 2–4 call hops to terminal effects (DB writes, queue publishes, external calls), then render a Mermaid system-flow diagram with every claim cited as path/to/file.ext:line. Output goes to docs/architecture/system-flow.md. No code changes. Fire on `/diagramsystemflow` or "draw/diagram the system flow."
 allowed-tools: Bash(rg:*), Bash(find:*), Bash(git:*), Read, Glob, Grep, Write
+context: fork
+background: false
 ---
 
 You are auditing this repository to produce a system flow diagram. Treat this 

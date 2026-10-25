@@ -10,11 +10,16 @@
 //   post-edit      after an Edit/MultiEdit/Write on the state file: a broken file has just that
 //                  edit undone; a lossy re-serialization is flagged
 //
+// session-start and user-prompt also carry the page's new roadmap requests (status new), one line
+// each, delivered once on the same ledgers as answers.
+//
 // Nothing is written for a repo with no state file in any worktree.
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { formatBlock, markDelivered, pendingFor, pruneSessions, repoHasState, updatedIn } from "./answers.mjs";
-import { checkoutFile, realpathSafe, resolveCheckout } from "./paths.mjs";
-import { locate } from "./state.mjs";
+import { basename, dirname } from "node:path";
+import { formatBlock, loadLedgers, markDelivered, pendingFor, pruneSessions, repoHasState, updatedIn } from "./answers.mjs";
+import { checkoutFile, homePath, loadConfig, realpathSafe, resolveCheckout } from "./paths.mjs";
+import { loadState, locate } from "./state.mjs";
 import { atomicWrite, withLock, writeLastGood } from "./write.mjs";
 
 const context = (hookEventName, additionalContext) => ({ hookSpecificOutput: { hookEventName, additionalContext } });
@@ -31,23 +36,98 @@ export async function runHook(event, payload = {}) {
     const { items } = await pendingFor(co, { sessionId, rule: "unseen-by-any" });
     // The session's own clock starts now either way, for user-prompt and stop.
     const session = { startedAt: new Date().toISOString(), seen: {} };
-    if (!items.length) return { after: () => markDelivered(co, [], sessionId, session) };
+    const rq = await roadmapPending(co, { sessionId, rule: "unseen-by-any" });
+    if (!items.length && !rq.length) return { after: () => markDelivered(co, [], sessionId, session) };
     // Only the batch the block shows is marked; the rest stay pending for `answers --new`.
-    const { text, shown } = formatBlock(co, items, { updated: updatedIn(co, items) });
+    const { text, shown } = combine(co, items, rq);
     return { out: context("SessionStart", text), after: () => markDelivered(co, shown, sessionId, session) };
   }
 
   if (event === "user-prompt" || event === "stop") {
     if (event === "stop" && payload.stop_hook_active) return null;
     const { items, session } = await pendingFor(co, { sessionId, rule: "since-session-start" });
-    if (!items.length) return null;
-    const { text, shown } = formatBlock(co, items, { updated: updatedIn(co, items) });
+    const rq = event === "user-prompt" ? await roadmapPending(co, { sessionId, rule: "since-session-start", session }) : [];
+    if (!items.length && !rq.length) return null;
+    const { text, shown } = combine(co, items, rq);
     return {
       out: event === "stop" ? { decision: "block", reason: text } : context("UserPromptSubmit", text),
       after: () => markDelivered(co, shown, sessionId, session),
     };
   }
   return null;
+}
+
+function combine(co, items, rq) {
+  const parts = [];
+  let shown = [];
+  if (items.length) {
+    const b = formatBlock(co, items, { updated: updatedIn(co, items) });
+    parts.push(b.text);
+    shown = b.shown;
+  }
+  if (rq.length) {
+    const b = formatRoadmapBlock(co, rq);
+    parts.push(b.text);
+    shown = shown.concat(b.shown);
+  }
+  return { text: parts.join("\n\n"), shown };
+}
+
+const ROADMAP_MAX = 5;
+const BRIEF_MAX = 300;
+const ms = (iso) => {
+  const t = Date.parse(iso ?? "");
+  return Number.isNaN(t) ? null : t;
+};
+
+// The page's roadmap requests still `new` in this checkout, as ledger items: the same delivered and
+// session ledgers as answers, keyed roadmap#<id>, so each reaches a session once.
+export async function roadmapPending(co, { sessionId, rule, session = null }) {
+  const { installedAt } = loadConfig();
+  if (!installedAt) return [];
+  const loc = locate(co);
+  if (loc.kind === "none") return [];
+  let state;
+  try {
+    ({ state } = await loadState(loc.statePath));
+  } catch {
+    return [];
+  }
+  const inst = ms(installedAt);
+  const all = state.roadmapRequests
+    .filter((r) => (r.status ?? "new") === "new" && (ms(r.at) ?? 0) > inst)
+    .map((r) => ({
+      kind: "roadmap",
+      key: `roadmap#${r.id}`,
+      qid: r.id,
+      version: createHash("sha1").update(`roadmap\n${r.id}\n${r.at}\n${r.kind}\n${r.itemId}`).digest("hex").slice(0, 16),
+      answeredAt: r.at,
+      request: r,
+    }));
+  const { delivered, session: own } = loadLedgers(co, sessionId);
+  if (rule === "unseen-by-any") return all.filter((i) => !delivered.versions[i.version]);
+  const s = session ?? own;
+  if (!s) return [];
+  const started = Math.floor((ms(s.startedAt) ?? Date.now()) / 1000) * 1000;
+  return all.filter((i) => (ms(i.answeredAt) ?? 0) >= started && !s.seen?.[i.version]);
+}
+
+export function formatRoadmapBlock(co, items) {
+  const repo = basename(co.isGit ? dirname(co.commonDir) : co.root);
+  const bs = homePath("bin", "build-status");
+  const shown = items.slice(0, ROADMAP_MAX);
+  const lines = [`build-status: the page records ${items.length} new roadmap request${items.length === 1 ? "" : "s"} in ${repo} (recorded only; ROADMAP.md is unchanged).`];
+  for (const { request: r } of shown) {
+    const brief = String(r.dispatch?.brief ?? "").replace(/\s+/g, " ").trim();
+    const what =
+      r.kind === "reorder" ? ` → ${r.to?.after ? `after ${r.to.after}` : r.to?.before ? `before ${r.to.before}` : "top of its section"}`
+      : r.kind === "dispatch" ? ` — opus ${r.dispatch?.opus ?? 0}, sonnet ${r.dispatch?.sonnet ?? 0}${brief ? `; brief: "${brief.length > BRIEF_MAX ? `${brief.slice(0, BRIEF_MAX)}…` : brief}"` : ""}`
+      : "";
+    lines.push(`- ${r.id} ${r.kind} ${r.itemId} "${r.itemTitle ?? ""}"${what}`);
+  }
+  if (items.length > shown.length) lines.push(`and ${items.length - shown.length} more: ${bs} roadmap-requests --open`);
+  lines.push(`Carry each out by the repo's rules: only this session edits ROADMAP.md, and a dispatch is a request, not a launch. ${bs} roadmap-status <id> sent when you take it up, then done --note '<what changed>' or declined --note '<why>'.`);
+  return { text: lines.join("\n"), shown };
 }
 
 // Undo exactly the edit that broke the file, so nothing anyone else wrote is lost. Only Edit and

@@ -11,3 +11,7 @@
 skills/swift-reviewer/	owner confirmed not theirs (2026-09-26)
 skills/synced/	claude.ai skill-sync buckets holding Anthropic's built-in skills; not a skill itself
 skills/use-railway/	Railway's vendor skill bundle (mcp.railway.com, Railway install scripts)
+skills/doc-consolidation/	owner's own skill, kept out of the mirror for good by owner choice (2026-10-13)
+skills/prose-upkeep/	owner's own skill, kept out of the mirror for good by owner choice (2026-10-13)
+skills/apply-branding/	owner declined to publish; always skip in sync (2026-10-25)
+commands/rate.md	owner declined to publish; always skip in sync (2026-10-25)

@@ -127,6 +127,11 @@ Runs only when no live ledger backlog exists. Steps:
    - `start=$(date +%s)`
    - `hard_deadline=$((start + 14400))`   # 4 hours
    - Write run metadata to the ledger; set `status: analyzing`.
+   - **Set the stop conditions as the session goal** so a separate evaluator checks them before
+     the session stops and they survive `--resume`: propose it with the ProposeGoal tool if it's
+     available, otherwise print once, for the owner to send:
+     `/goal closeout written to .claude/self-improve-ledger.md after the 4-hour cap (<hard_deadline as local time>), or after the backlog is empty and a re-analysis surfaces nothing eligible, or once the usage window is exhausted`.
+     The wall-clock checks below stay; the goal backs them up, it doesn't replace them.
 2. **Detect the repo's checks** (build/test/lint commands) so later verification is real —
    read `package.json` scripts, `Makefile`, `pyproject.toml`, CI config, etc. Record them
    in the ledger.
@@ -184,6 +189,10 @@ log(`verify: kept ${kept.length}, refuted ${refuted.length}` +
 return { backlog: rankAndFilter(kept), refuted }   // refuted travels WITH the backlog — never a silent drop
 ```
 
+**Agent effort.** Run finder and corroboration agents at `effort: medium` (the Agent tool's
+`effort` parameter; pass it in the workflow's `agent()` options too if the script API accepts it).
+The main loop keeps the session's effort.
+
 If `Workflow` is unavailable: run the same fan-out as parallel inline `Agent()` calls
 (five finders → corroborate → dedup → rank), and **tell the user** to re-run with
 `ultracode` for the full swarm.
@@ -207,12 +216,17 @@ Repeat until a **STOP condition** fires:
      winner strictly beats the champion; if it does not beat the champion, mark the item
      `skipped(ratchet: no improvement)` and move on.
    - **Otherwise →** implement **inline** or via a **single focused agent**.
+   - **Code-smell / refactor item with no behavior change →** after implementing, run the bundled
+     **`/simplify`** on the changed files before verifying.
 4. **Verify it.** Run the repo's relevant checks recorded in Phase 1 (tests / build / lint).
    If verification fails and can't be quickly fixed within the item's scope, revert the
    change, mark `skipped(verify failed)`, and log it — do not ship red.
-5. **Ship it with `/shipit`** (commit → push → merge to main). **One item = one shipit.**
+5. **Review it.** Run **`/code-review medium`** on the item's diff and fix anything it reports
+   as a correctness bug. If a reported bug can't be fixed within the item's scope, revert, mark
+   `skipped(review: <bug>)`, and log it. Re-run step 4's checks after any fix.
+6. **Ship it with `/shipit`** (commit → push → merge to main). **One item = one shipit.**
    Record the returned commit **SHA** in the ledger log.
-6. **Update the ledger.** Mark the item `done`, re-rank remaining, stamp
+7. **Update the ledger.** Mark the item `done`, re-rank remaining, stamp
    `last_touched_epoch`. **If the backlog is running low**, trigger a **fresh, lighter
    analysis swarm** across the five focus areas to refill it (same Workflow, smaller finder
    fan-out).

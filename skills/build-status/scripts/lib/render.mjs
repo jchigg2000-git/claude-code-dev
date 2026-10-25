@@ -3,7 +3,7 @@
 // ctx, gathered by page.mjs. No fs, no git, no process state in here — so the CLI, the daemon and
 // (later) a hub can all render the same page, and a repo-specific layer can add tabs through
 // ctx.extraTabs without touching this file.
-import { gateSummary, isSettled } from "./normalize.mjs";
+import { gateSummary, isOwnerTopic, isSettled, REWRITE_STALE_MS, threadOf } from "./normalize.mjs";
 
 const esc = (s) =>
   String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -157,6 +157,9 @@ function relTime(ms) {
   return Math.floor(h / 24) + " days ago";
 }
 
+// When a topic last moved: its newest message, else when it was asked.
+const lastAt = (q) => (Array.isArray(q.thread) && q.thread.length ? q.thread.at(-1)?.at : q.askedAt) ?? "";
+
 // The browser tab: the repo's initials on a colour of its own, so one build's tab is easy to pick
 // out from another's, and a dot in the top severity's colour while a question waits.
 const TAB_COLOURS = ["#08284D", "#0A6FB3", "#5B3FA0", "#0F6E74", "#3D4F63", "#8A2D6B"];
@@ -180,6 +183,485 @@ const COMMENT_HINTS = {
   urgent: "As soon as the build sees it: within seconds while its keeper is watching, otherwise at the next pass. It stops at the next safe point and deals with it. If it disagrees, it asks you rather than carry on.",
 };
 
+// --- Roadmap tab ------------------------------------------------------------------------------
+// The page never writes ROADMAP.md. Every control only records a request (POST /roadmap/request,
+// /roadmap/withdraw); the main session carries it out and the page shows where each one stands.
+// All of this is emitted only when the state carries `_roadmap`, so a page without one is
+// byte-for-byte what it was before the tab existed.
+const RM_NOTE = "Requests only. ROADMAP.md is not edited from this page; the main session carries each request out.";
+const RM_OPEN = new Set(["new", "held", "sent"]);
+const RM_REQ_STATUS = { new: "waiting for the main session", held: "held", sent: "with the main session", filed: "filed to the backlog", done: "done", declined: "declined", withdrawn: "withdrawn" };
+const RM_KIND = { reorder: "Reorder", remove: "Remove", dispatch: "Dispatch", restore: "Restore" };
+const RM_PENDING = { reorder: "reorder requested", remove: "removal requested", dispatch: "dispatch requested", restore: "restore requested" };
+const RM_NOUN = { reorder: "reorder request", remove: "removal request", dispatch: "dispatch request", restore: "restore request" };
+const rmSlug = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+const rmText = (v) => esc(v ?? "");
+const rmReqStatus = (r) => (RM_REQ_STATUS[r?.status] ? r.status : "new");
+
+function roadmapItemHtml(it, idx, ctx) {
+  const { live, last } = ctx;
+  const id = String(it?.id ?? `item-${idx}`);
+  const title = String(it?.title ?? "");
+  const removed = !!it?.removed;
+  const pending = Array.isArray(it?.pending) ? it.pending.filter((p) => p && typeof p === "object") : [];
+  const off = live ? "" : " disabled";
+  const dAttr = `data-item-id="${esc(id)}"`;
+  const removeReq = pending.find((p) => p.kind === "remove");
+  // An undo while the removal is still "new" just withdraws it; once it has been picked up, the
+  // way back is a "restore" request.
+  const undoByWithdraw = removed && removeReq && (removeReq.status ?? "new") === "new" && removeReq.id;
+  const chips = pending
+    .map((p) => {
+      const st = String(p.status ?? "new");
+      const label = `${RM_PENDING[p.kind] || `${String(p.kind ?? "change")} requested`}${st === "new" ? "" : ` - ${st}`}`;
+      // The row's own Undo stands in for the Withdraw on a "new" removal.
+      const withdraw =
+        st === "new" && p.id && !(undoByWithdraw && p === removeReq)
+          ? `<button type="button" class="rm-btn mini" data-roadmap-action="withdraw" data-request-id="${esc(p.id)}" data-item-id="${esc(id)}" aria-label="Withdraw the ${esc(RM_NOUN[p.kind] || "change request")} for ${esc(id)}"${off}>Withdraw</button>`
+          : "";
+      return `<span class="rm-pend"><span class="rm-chip pending s-${esc(rmSlug(st))}" data-request-kind="${esc(p.kind ?? "")}" data-request-status="${esc(st)}">${esc(label)}</span>${withdraw}</span>`;
+    })
+    .join("");
+  const moved = !!it?.movedByRequest && !pending.some((p) => p.kind === "reorder");
+  const status = it?.status ? `<span class="rm-chip st rm-st-${esc(rmSlug(it.status))}">${esc(it.status)}</span>` : "";
+  const backlog = it?.backlog ? `<span class="rm-chip backlog">backlog</span>` : "";
+  const line = it?.line != null && it.line !== "" ? `<span class="rm-line">line ${esc(it.line)}</span>` : "";
+  const movedChip = moved ? `<span class="rm-chip pending">moved by request</span>` : "";
+  const prefill = `Work on ${id} ${title}: `;
+  const actions = removed
+    ? `<button type="button" class="rm-btn" data-roadmap-action="undo" data-undo-mode="${undoByWithdraw ? "withdraw" : "restore"}"${undoByWithdraw ? ` data-request-id="${esc(removeReq.id)}"` : ""} ${dAttr} aria-label="Undo the removal of ${esc(id)}"${off}>Undo</button>`
+    : `<button type="button" class="rm-btn" data-roadmap-action="up" ${dAttr} aria-label="Move ${esc(id)} up"${live && !ctx.first ? "" : " disabled"}>Up</button>` +
+      `<button type="button" class="rm-btn" data-roadmap-action="down" ${dAttr} aria-label="Move ${esc(id)} down"${live && !last ? "" : " disabled"}>Down</button>` +
+      `<button type="button" class="rm-btn" data-roadmap-action="dispatch" ${dAttr} aria-expanded="false" aria-label="Dispatch agents for ${esc(id)}"${off}>Dispatch</button>` +
+      `<button type="button" class="rm-btn danger" data-roadmap-action="remove" ${dAttr} aria-label="Remove ${esc(id)}"${off}>Remove</button>`;
+  const handle = removed
+    ? `<span class="rm-handle-gap" aria-hidden="true"></span>`
+    : `<button type="button" class="rm-handle" data-roadmap-action="drag" ${dAttr} aria-label="Reorder ${esc(id)}: drag, or use the arrow keys" title="Drag to move; the up and down arrow keys also work"${off}>&equiv;</button>`;
+  const panel = removed
+    ? ""
+    : `<div class="rm-dispatch" ${dAttr} hidden>
+        <div class="rm-agents" role="group" aria-label="Agents to dispatch, at most one of each">
+          <label class="rm-check"><input type="checkbox" class="rm-opus"> Opus agent</label>
+          <label class="rm-check"><input type="checkbox" class="rm-sonnet"> Sonnet agent</label>
+        </div>
+        <label class="rm-brieflabel">Brief<textarea class="rm-brief" rows="3" data-prefill="${esc(prefill)}"${off}>${esc(prefill)}</textarea></label>
+        <p class="rm-err" role="alert" hidden></p>
+        <div class="rm-dispatch-row"><button type="button" class="rm-btn" data-roadmap-action="cancel" ${dAttr}>Cancel</button><button type="button" class="rm-btn primary" data-roadmap-action="send" ${dAttr}${off}>Send</button></div>
+      </div>`;
+  const cls = `rm-item${removed ? " removed" : ""}${it?.movedByRequest ? " moved" : ""}${pending.length ? " has-pending" : ""}`;
+  return `<li class="${cls}" ${dAttr} data-removed="${removed ? 1 : 0}">
+    <div class="rm-row">
+      ${handle}
+      <div class="rm-main">
+        <p class="rm-head">${it?.marker ? `<span class="rm-marker">${esc(it.marker)}</span> ` : ""}<span class="rm-id">${esc(id)}</span> <span class="rm-title">${esc(title)}</span></p>
+        <div class="rm-meta">${status}${backlog}${line}${movedChip}${chips}</div>
+        ${it?.summary ? `<p class="rm-summary">${esc(it.summary)}</p>` : ""}
+      </div>
+      <div class="rm-actions">${actions}</div>
+    </div>
+    ${panel}
+  </li>`;
+}
+
+function roadmapSectionHtml(sec, si, live) {
+  const items = Array.isArray(sec?.items) ? sec.items.filter((x) => x && typeof x === "object") : [];
+  const liveItems = items.filter((x) => !x.removed);
+  const firstLive = liveItems[0];
+  const lastLive = liveItems[liveItems.length - 1];
+  const removedN = items.length - liveItems.length;
+  const pendingN = items.filter((x) => Array.isArray(x.pending) && x.pending.length).length;
+  const sid = String(sec?.id ?? `section-${si}`);
+  const n = liveItems.length;
+  return `<details class="card rm-sec${sec?.backlog ? " is-backlog" : ""}" data-section-id="${esc(sid)}"${sec?.backlog ? "" : " open"}>
+      <summary><h2>${esc(sec?.title ?? sid)}</h2><span class="rm-count">${n} item${n === 1 ? "" : "s"}${removedN ? ` &middot; ${removedN} to remove` : ""}</span>${sec?.backlog ? `<span class="rm-chip backlog">backlog</span>` : ""}${pendingN ? `<span class="rm-chip pending">${pendingN} requested</span>` : ""}</summary>
+      ${items.length ? `<ul class="rm-list" data-section-id="${esc(sid)}">${items.map((it, i) => roadmapItemHtml(it, i, { live, first: it === firstLive, last: it === lastLive })).join("\n")}</ul>` : `<p class="qempty">Nothing in this section.</p>`}
+    </details>`;
+}
+
+function roadmapRequestHtml(r, live) {
+  const st = rmReqStatus(r);
+  const open = RM_OPEN.has(st);
+  const kind = RM_KIND[r?.kind] || String(r?.kind ?? "Request");
+  const to = r?.to && typeof r.to === "object" ? r.to : {};
+  let detail = "";
+  if (r?.kind === "reorder") {
+    detail = to.after && to.before ? `Place it between ${to.after} and ${to.before}.` : to.after ? `Move it to the end, after ${to.after}.` : to.before ? `Move it to the top, before ${to.before}.` : "";
+  } else if (r?.kind === "remove") detail = "Remove it from the roadmap.";
+  else if (r?.kind === "restore") detail = "Put it back.";
+  else if (r?.kind === "dispatch" && r.dispatch) {
+    const who = [r.dispatch.opus ? "Opus agent" : "", r.dispatch.sonnet ? "Sonnet agent" : ""].filter(Boolean).join(" and ");
+    detail = `${who || "No agent chosen"}: ${r.dispatch.brief ?? ""}`;
+  }
+  return `<li class="citem normal rm-req" data-request-id="${rmText(r?.id)}" data-request-kind="${rmText(r?.kind)}" data-request-status="${st}">
+      <div class="chead"><span class="rm-kind">${esc(kind)}</span><span class="cstatus ${st}">${RM_REQ_STATUS[st]}</span><span class="cwhen">${esc(r?.at ? new Date(r.at).toLocaleString() : "")}</span></div>
+      <p class="rm-req-item"><span class="rm-id">${rmText(r?.itemId)}</span> ${rmText(r?.itemTitle)}</p>
+      ${detail ? `<p class="ctext">${esc(detail)}</p>` : ""}
+      ${r?.note ? `<p class="cnote"><span class="qrec-label">Note:</span> ${esc(r.note)}</p>` : ""}
+      ${st === "new" && r?.id ? `<div class="rm-req-actions"><button type="button" class="rm-btn mini" data-roadmap-action="withdraw" data-request-id="${esc(r.id)}" data-item-id="${rmText(r?.itemId)}" aria-label="Withdraw this ${esc(kind.toLowerCase())} request"${live ? "" : " disabled"}>Withdraw</button></div>` : ""}
+    </li>`;
+}
+
+// Everything the Roadmap tab adds to the page, or null when the state has no `_roadmap`.
+function roadmapView(state, { live, reason }) {
+  const rm = state._roadmap;
+  if (!rm || typeof rm !== "object") return null;
+  const requests = (Array.isArray(state.roadmapRequests) ? state.roadmapRequests : []).filter((r) => r && typeof r === "object");
+  const byNewest = (a, b) => String(b.at ?? "").localeCompare(String(a.at ?? ""));
+  const openReqs = requests.filter((r) => RM_OPEN.has(rmReqStatus(r))).sort(byNewest);
+  const doneReqs = requests.filter((r) => !RM_OPEN.has(rmReqStatus(r))).sort(byNewest);
+  const sections = Array.isArray(rm.sections) ? rm.sections : [];
+  const readAtMs = rm.readAt ? Date.parse(rm.readAt) : NaN;
+  const src =
+    rm.source || Number.isFinite(readAtMs)
+      ? `<p class="rm-src">${rm.source ? `Read from <code>${esc(rm.source)}</code>` : "Read"}${Number.isFinite(readAtMs) ? ` <time datetime="${esc(rm.readAt)}">${esc(new Date(readAtMs).toLocaleString())}</time>` : ""}</p>`
+      : "";
+  const body = [
+    rm.error ? `<div class="card rm-error" role="alert"><strong>Could not read the roadmap.</strong> <span class="rm-error-text">${esc(rm.error)}</span></div>` : "",
+    sections.length
+      ? sections.map((s, i) => roadmapSectionHtml(s, i, live)).join("\n")
+      : rm.error
+        ? ""
+        : `<div class="card"><div class="qempty rm-empty">No roadmap items found${rm.source ? ` in ${esc(rm.source)}` : ""}.</div></div>`,
+  ].join("\n");
+  const panelHtml = `<div id="tab-roadmap" class="tabpanel" role="tabpanel" aria-labelledby="tabbtn-roadmap" tabindex="0">
+<div class="note rm-note">${esc(RM_NOTE)}</div>
+${!live && reason ? `<div class="qhint">Read-only right now &mdash; ${esc(reason)}.</div>` : ""}
+${src}
+<p id="rm-msg" class="rm-msg" role="status" aria-live="polite"></p>
+${body}
+<div class="card" id="roadmap-requests-card">
+  <h2>Requests${openReqs.length ? ` &middot; ${openReqs.length} open` : ""}</h2>
+  ${openReqs.length ? `<ul class="clist rm-reqs">${openReqs.map((r) => roadmapRequestHtml(r, live)).join("")}</ul>` : `<p class="qempty">${requests.length ? "Nothing open." : "No requests yet."}</p>`}
+  ${doneReqs.length ? `<details class="cclosed"><summary>Handled &middot; ${doneReqs.length}</summary><ul class="clist rm-reqs">${doneReqs.map((r) => roadmapRequestHtml(r, live)).join("")}</ul></details>` : ""}
+</div>
+</div>
+`;
+  return {
+    badge: openReqs.length ? `<span class="badge info" title="${openReqs.length} open roadmap request${openReqs.length === 1 ? "" : "s"}">${openReqs.length}<span class="sr-only"> open</span></span>` : "",
+    panelHtml,
+  };
+}
+
+const ROADMAP_CSS = `
+  /* The tab badges carry an absolutely positioned .sr-only; without a positioned scroll container its
+     static position, past the last tab, widens the whole page on a phone. */
+  .tabs{position:relative}
+  .rm-note{margin-bottom:12px}
+  .rm-src{font-size:12.5px;color:var(--mut);margin:0 0 12px;overflow-wrap:anywhere}
+  .rm-src code{background:#eaf1f7;padding:1px 6px;border-radius:4px;color:var(--navy)}
+  .rm-msg{font-size:13px;font-weight:600;color:var(--ember-text);margin:0 0 10px}
+  .rm-msg:empty{display:none}
+  .rm-error{border-left:4px solid var(--ember);background:#fff7f0;color:#8a3c06;font-size:13.5px;overflow-wrap:anywhere}
+  .rm-sec>summary{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;min-height:40px}
+  .rm-sec>summary::before{content:"";flex:none;width:0;height:0;border-style:solid;border-width:5px 0 5px 7px;border-color:transparent transparent transparent var(--mut);transition:transform .15s}
+  .rm-sec[open]>summary::before{transform:rotate(90deg)}
+  .rm-sec>summary h2{overflow-wrap:anywhere}
+  .rm-count{font-size:12.5px;color:var(--mut);font-variant-numeric:tabular-nums}
+  .rm-sec.is-backlog{background:#fafcfd}
+  .rm-list{list-style:none;margin:0;padding:0}
+  .rm-item{position:relative;border-top:1px solid #eef3f7;padding:10px 0}
+  .rm-item:first-child{border-top:0}
+  .rm-item.moved::before{content:"";position:absolute;left:-9px;top:10px;bottom:10px;width:3px;border-radius:2px;background:var(--blue)}
+  .rm-item.dragging{opacity:.55;background:#eef6fc}
+  .rm-item.drop-before{box-shadow:0 -2px 0 0 var(--blue-text)}
+  .rm-item.drop-end{box-shadow:0 2px 0 0 var(--blue-text)}
+  .rm-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px 10px;align-items:start}
+  .rm-main{min-width:0}
+  .rm-handle,.rm-handle-gap{width:32px;height:32px;flex:none}
+  .rm-handle{appearance:none;padding:0;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--mut);font:inherit;font-size:18px;line-height:1;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+  .rm-handle:hover:not(:disabled){border-color:var(--blue-text);color:var(--navy)}
+  .rm-handle:active{cursor:grabbing}
+  .rm-handle:disabled{opacity:.4;cursor:not-allowed}
+  .rm-head{margin:0;font-size:14.5px;overflow-wrap:anywhere}
+  .rm-marker{font-size:14px}
+  .rm-id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;font-weight:600;color:var(--blue-text);overflow-wrap:anywhere}
+  .rm-title{font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+  .rm-item.removed .rm-head{text-decoration:line-through;color:var(--mut)}
+  .rm-item.removed .rm-title{color:var(--mut)}
+  .rm-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin-top:4px;min-width:0}
+  .rm-pend{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;max-width:100%}
+  .rm-chip{display:inline-flex;align-items:center;font-size:12px;font-weight:600;line-height:1.3;padding:2px 9px;border-radius:99px;border:1px solid var(--line);background:#f2f5f8;color:#3b4b5e;max-width:100%;overflow-wrap:anywhere}
+  .rm-chip.backlog{background:#f6f8fa;border-style:dashed;color:var(--mut)}
+  .rm-chip.pending{background:#e8f3fb;border-color:#c4e0f3;color:#0A5A92}
+  .rm-chip.pending.s-sent{background:#eaf7ee;border-color:#c9e8d3;color:#1d6b38}
+  .rm-chip.pending.s-held{background:#fff4e2;border-color:#ffd79a;color:#6b4708}
+  .rm-chip.st.rm-st-blocked{background:#fde9db;border-color:#f7c9a3;color:#8a3c06}
+  .rm-chip.st.rm-st-done,.rm-chip.st.rm-st-shipped{background:#eaf7ee;border-color:#c9e8d3;color:#1d6b38}
+  .rm-chip.st.rm-st-in-progress,.rm-chip.st.rm-st-in-build,.rm-chip.st.rm-st-active{background:#e8f3fb;border-color:#c4e0f3;color:#0A5A92}
+  .rm-line{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
+  .rm-summary{margin:4px 0 0;font-size:13px;color:#4a5d70;overflow-wrap:anywhere}
+  .rm-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+  .rm-btn{appearance:none;font:inherit;font-size:13px;font-weight:600;min-height:32px;min-width:32px;padding:4px 12px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--navy);cursor:pointer}
+  .rm-btn:hover:not(:disabled){border-color:var(--blue-text)}
+  .rm-btn:disabled{opacity:.5;cursor:not-allowed}
+  .rm-btn.mini{min-height:24px;min-width:24px;padding:1px 9px;font-size:12px}
+  .rm-btn.primary{background:var(--blue-text);border-color:var(--blue-text);color:#fff}
+  .rm-btn.danger{background:#fff7f0;border-color:#f7c9a3;color:#8a3c06}
+  .rm-handle:focus-visible,.rm-btn:focus-visible,.rm-brief:focus-visible,.rm-check input:focus-visible{outline:2px solid var(--blue-text);outline-offset:2px}
+  .rm-dispatch{margin:8px 0 2px 42px;padding:10px 12px;border:1px solid var(--line);border-left:3px solid var(--blue-text);border-radius:8px;background:#f6f9fc}
+  .rm-agents{display:flex;flex-wrap:wrap;gap:4px 14px;margin:0 0 6px}
+  .rm-check{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:2px 8px 2px 2px;font-size:13.5px;color:var(--ink);cursor:pointer}
+  .rm-check input{width:24px;height:24px;margin:0;accent-color:var(--blue-text)}
+  .rm-brieflabel{display:block;font-size:12.5px;font-weight:600;color:var(--mut)}
+  .rm-brief{display:block;width:100%;max-width:100%;min-height:72px;margin-top:4px;resize:vertical;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13.5px;font-weight:400;color:var(--ink)}
+  .rm-brief:disabled{opacity:.55;cursor:not-allowed}
+  .rm-err{margin:6px 0 0;font-size:12.5px;font-weight:600;color:var(--ember-text)}
+  .rm-dispatch-row{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:8px}
+  .rm-kind{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:2px 8px;border-radius:99px;border:1px solid #c4e0f3;background:#e8f3fb;color:#0A5A92}
+  .rm-req-item{margin:5px 0 2px;font-size:13.5px;overflow-wrap:anywhere}
+  .rm-req-actions{margin-top:6px}
+  .rm-req .chead{font-size:12px}
+  #roadmap-requests-card .cclosed>summary{display:flex;align-items:center;min-height:32px}
+  @media(max-width:640px){
+    .rm-sec.card,#roadmap-requests-card{padding:12px}
+    .rm-row{grid-template-columns:auto minmax(0,1fr)}
+    .rm-actions{grid-column:1 / -1;justify-content:flex-start}
+    .rm-btn,.rm-btn.mini{min-height:40px;min-width:40px;padding:6px 11px}
+    .rm-handle,.rm-handle-gap{width:40px;height:40px}
+    .rm-check,#roadmap-requests-card .cclosed>summary{min-height:40px}
+    .rm-dispatch{margin-left:0}
+    .rm-brief{font-size:16px}
+    .rm-dispatch-row .rm-btn{flex:1 1 40%}
+  }
+  @media(prefers-reduced-motion:reduce){.rm-sec>summary::before{transition:none}}`;
+
+const ROADMAP_SCRIPT = `
+
+  // --- Roadmap: every control records a request (POST /roadmap/request or /roadmap/withdraw) and
+  // the page reloads to show it. Nothing here edits ROADMAP.md. An open dispatch panel holds the
+  // 20s refresh (rmPanelOpen) and rides out a reload in sessionStorage; so does a drag (it counts
+  // as a save in flight). Which sections are open is kept in localStorage.
+  var rmTab = document.getElementById("tab-roadmap");
+  var rmMsg = document.getElementById("rm-msg");
+  var RSKEY = STORE + ":roadmap-sections";
+  var RPKEY = STORE + ":roadmap-panels";
+  var rmBusy = false;
+  function rmSay(text){ if (rmMsg) rmMsg.textContent = text || ""; }
+  function rmArr(list){ return Array.prototype.slice.call(list || []); }
+  function rmButtons(){ return rmTab ? rmArr(rmTab.querySelectorAll("button[data-roadmap-action]")) : []; }
+  function rmRows(){ return rmTab ? rmArr(rmTab.querySelectorAll(".rm-item")) : []; }
+  function rmIdOf(el){ return el ? el.getAttribute("data-item-id") : null; }
+  function rmRow(id){ var rows = rmRows(); for (var i = 0; i < rows.length; i++) { if (rmIdOf(rows[i]) === id) return rows[i]; } return null; }
+  function rmPanel(row){ return row ? row.querySelector(".rm-dispatch") : null; }
+  function rmLive(row){ return rmArr(row.parentNode.children).filter(function(el){ return el.classList.contains("rm-item") && !el.classList.contains("removed"); }); }
+  function rmLock(on){
+    rmBusy = on;
+    rmButtons().forEach(function(b){
+      if (on) { b.setAttribute("data-was-disabled", b.disabled ? "1" : "0"); b.disabled = true; }
+      else { b.disabled = b.getAttribute("data-was-disabled") === "1"; }
+    });
+  }
+  function rmPost(path, body, onOk, onFail){
+    if (rmBusy) return;
+    rmSay("");
+    rmLock(true);
+    savesInFlight++;
+    fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function(r){
+      if (!r.ok) return r.json().catch(function(){ return {}; }).then(function(j){
+        var e = new Error(j.error || ("request failed (" + r.status + ")"));
+        e.status = r.status;
+        throw e;
+      });
+      if (onOk) onOk();
+      saveScroll();
+      location.reload();
+    }).catch(function(err){
+      savesInFlight--;
+      rmLock(false);
+      if (err.status === 409) {
+        rmSay("That request was already picked up, so it can no longer be changed here. Reloading to show where it stands.");
+        setTimeout(function(){ saveScroll(); location.reload(); }, 2500);
+        return;
+      }
+      rmSay("Could not record the request: " + err.message);
+      if (onFail) onFail(err);
+    });
+  }
+  function rmMove(row, dir){
+    var live = rmLive(row), i = live.indexOf(row), j = i + dir;
+    if (i < 0 || j < 0 || j >= live.length) return;
+    var to = dir < 0 ? { after: rmIdOf(live[j - 1]), before: rmIdOf(live[j]) } : { after: rmIdOf(live[j]), before: rmIdOf(live[j + 1]) };
+    rmPost("/roadmap/request", { kind: "reorder", itemId: rmIdOf(row), to: to });
+  }
+
+  // Dispatch panel: Opus and Sonnet checkboxes (one of each at most) and a brief.
+  function rmPanelOpen(){
+    var rows = rmRows();
+    for (var i = 0; i < rows.length; i++) { var p = rmPanel(rows[i]); if (p && !p.hidden) return true; }
+    return false;
+  }
+  function rmSavePanels(){
+    var out = {};
+    rmRows().forEach(function(row){
+      var p = rmPanel(row);
+      if (!p || p.hidden) return;
+      out[rmIdOf(row)] = { opus: p.querySelector(".rm-opus").checked, sonnet: p.querySelector(".rm-sonnet").checked, brief: p.querySelector(".rm-brief").value };
+    });
+    writeJson("sessionStorage", RPKEY, out);
+  }
+  function rmShowPanel(row, show){
+    var p = rmPanel(row);
+    if (!p) return;
+    p.hidden = !show;
+    var b = row.querySelector('button[data-roadmap-action="dispatch"]');
+    if (b) b.setAttribute("aria-expanded", show ? "true" : "false");
+  }
+  function rmOpenPanel(row){
+    var p = rmPanel(row);
+    if (!p) return;
+    if (!p.hidden) { rmClosePanel(row); return; }
+    rmShowPanel(row, true);
+    noteActivity();
+    var brief = p.querySelector(".rm-brief");
+    if (brief && !brief.disabled) { brief.focus(); brief.setSelectionRange(brief.value.length, brief.value.length); }
+    rmSavePanels();
+  }
+  function rmClosePanel(row){
+    var p = rmPanel(row);
+    if (!p) return;
+    p.querySelector(".rm-opus").checked = false;
+    p.querySelector(".rm-sonnet").checked = false;
+    var brief = p.querySelector(".rm-brief");
+    brief.value = brief.getAttribute("data-prefill") || "";
+    p.querySelector(".rm-err").hidden = true;
+    rmShowPanel(row, false);
+    rmSavePanels();
+  }
+  function rmSend(row){
+    var p = rmPanel(row);
+    if (!p) return;
+    var opus = p.querySelector(".rm-opus").checked, sonnet = p.querySelector(".rm-sonnet").checked;
+    var brief = (p.querySelector(".rm-brief").value || "").trim();
+    var err = p.querySelector(".rm-err");
+    if (!opus && !sonnet) { err.textContent = "Pick an Opus agent, a Sonnet agent, or both."; err.hidden = false; return; }
+    if (!brief) { err.textContent = "Write a brief for the agent."; err.hidden = false; p.querySelector(".rm-brief").focus(); return; }
+    err.hidden = true;
+    rmPost("/roadmap/request", { kind: "dispatch", itemId: rmIdOf(row), dispatch: { opus: opus ? 1 : 0, sonnet: sonnet ? 1 : 0, brief: brief } }, function(){
+      p.hidden = true;
+      rmSavePanels();
+    });
+  }
+  (function rmRestorePanels(){
+    var saved = readJson("sessionStorage", RPKEY) || {};
+    Object.keys(saved).forEach(function(id){
+      var row = rmRow(id), p = rmPanel(row), s = saved[id] || {};
+      if (!p) return;
+      p.querySelector(".rm-opus").checked = !!s.opus;
+      p.querySelector(".rm-sonnet").checked = !!s.sonnet;
+      if (typeof s.brief === "string" && s.brief) p.querySelector(".rm-brief").value = s.brief;
+      rmShowPanel(row, true);
+    });
+    rmSavePanels();
+  })();
+
+  if (rmTab) {
+    rmTab.addEventListener("click", function(e){
+      var btn = e.target && e.target.closest ? e.target.closest("button[data-roadmap-action]") : null;
+      if (!btn || btn.disabled) return;
+      var act = btn.getAttribute("data-roadmap-action"), id = btn.getAttribute("data-item-id"), row = id ? rmRow(id) : null;
+      if (act === "up" && row) rmMove(row, -1);
+      else if (act === "down" && row) rmMove(row, 1);
+      else if (act === "remove") rmPost("/roadmap/request", { kind: "remove", itemId: id });
+      else if (act === "undo" && btn.getAttribute("data-undo-mode") === "withdraw") rmPost("/roadmap/withdraw", { id: btn.getAttribute("data-request-id") });
+      else if (act === "undo") rmPost("/roadmap/request", { kind: "restore", itemId: id });
+      else if (act === "withdraw") rmPost("/roadmap/withdraw", { id: btn.getAttribute("data-request-id") });
+      else if (act === "dispatch" && row) rmOpenPanel(row);
+      else if (act === "cancel" && row) rmClosePanel(row);
+      else if (act === "send" && row) rmSend(row);
+    });
+    var rmDraft = function(){ noteActivity(); rmSavePanels(); };
+    rmTab.addEventListener("input", function(e){ if (e.target && e.target.classList && e.target.classList.contains("rm-brief")) rmDraft(); });
+    rmTab.addEventListener("change", function(e){ if (e.target && e.target.classList && (e.target.classList.contains("rm-opus") || e.target.classList.contains("rm-sonnet"))) rmDraft(); });
+    rmTab.addEventListener("keydown", function(e){
+      var h = e.target && e.target.classList && e.target.classList.contains("rm-handle") ? e.target : null;
+      if (!h || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+      e.preventDefault();
+      var row = rmRow(h.getAttribute("data-item-id"));
+      if (row && !rmBusy && !h.disabled) rmMove(row, e.key === "ArrowUp" ? -1 : 1);
+    });
+  }
+
+  // Drag by the handle only (touch-action: none there, so the rest of the row still scrolls the page).
+  // Pointer events cover mouse, pen and touch. Dropping records the same reorder request as Up and
+  // Down, within the item's own section.
+  var rmDrag = null;
+  function rmClearDrop(list){ rmArr(list.children).forEach(function(el){ el.classList.remove("drop-before", "drop-end"); }); }
+  function rmAim(d){
+    var others = rmLive(d.row).filter(function(el){ return el !== d.row; });
+    var target = null;
+    for (var i = 0; i < others.length; i++) {
+      var r = others[i].getBoundingClientRect();
+      if (d.y < r.top + r.height / 2) { target = others[i]; break; }
+    }
+    var at = target ? others.indexOf(target) : others.length;
+    var origAt = rmLive(d.row).indexOf(d.row);
+    d.before = rmIdOf(target);
+    d.after = at > 0 ? rmIdOf(others[at - 1]) : null;
+    d.noop = at === origAt;
+    rmClearDrop(d.list);
+    if (!d.noop) {
+      if (target) target.classList.add("drop-before");
+      else if (others.length) others[others.length - 1].classList.add("drop-end");
+    }
+  }
+  function rmDragEnd(commit){
+    var d = rmDrag;
+    if (!d) return;
+    rmDrag = null;
+    clearInterval(d.timer);
+    savesInFlight--;
+    d.row.classList.remove("dragging");
+    rmClearDrop(d.list);
+    document.body.style.userSelect = d.prevSelect;
+    try { d.handle.releasePointerCapture(d.pid); } catch (err) {}
+    if (commit && !d.noop) rmPost("/roadmap/request", { kind: "reorder", itemId: rmIdOf(d.row), to: { after: d.after, before: d.before } });
+  }
+  rmArr(rmTab ? rmTab.querySelectorAll(".rm-handle") : []).forEach(function(handle){
+    handle.addEventListener("pointerdown", function(e){
+      if (rmDrag || rmBusy || handle.disabled || (e.pointerType === "mouse" && e.button !== 0)) return;
+      var row = handle.closest(".rm-item");
+      if (!row || rmLive(row).length < 2) return;
+      e.preventDefault();
+      noteActivity();
+      rmDrag = { row: row, list: row.parentNode, handle: handle, pid: e.pointerId, y: e.clientY, before: null, after: null, noop: true, prevSelect: document.body.style.userSelect, timer: 0 };
+      savesInFlight++;
+      document.body.style.userSelect = "none";
+      row.classList.add("dragging");
+      try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+      // Near the top or bottom edge the page scrolls itself, since a touch drag cannot.
+      rmDrag.timer = setInterval(function(){
+        var d = rmDrag;
+        if (!d) return;
+        var step = d.y < 70 ? -12 : d.y > window.innerHeight - 70 ? 12 : 0;
+        if (step) { window.scrollBy(0, step); rmAim(d); }
+      }, 30);
+    });
+    handle.addEventListener("pointermove", function(e){
+      if (!rmDrag || rmDrag.handle !== handle) return;
+      rmDrag.y = e.clientY;
+      noteActivity();
+      rmAim(rmDrag);
+    });
+    handle.addEventListener("pointerup", function(e){ if (rmDrag && rmDrag.handle === handle) { rmDrag.y = e.clientY; rmAim(rmDrag); rmDragEnd(true); } });
+    handle.addEventListener("pointercancel", function(){ if (rmDrag && rmDrag.handle === handle) rmDragEnd(false); });
+  });
+
+  (function rmRestoreSections(){
+    var open = readJson("localStorage", RSKEY) || {};
+    if (!rmTab) return;
+    rmArr(rmTab.querySelectorAll("details.rm-sec")).forEach(function(d){
+      var id = d.getAttribute("data-section-id");
+      if (typeof open[id] === "boolean") d.open = open[id];
+      var dflt = !d.classList.contains("is-backlog");
+      d.addEventListener("toggle", function(){ if (d.open === dflt) delete open[id]; else open[id] = d.open; writeJson("localStorage", RSKEY, open); });
+    });
+  })();`;
+
+
 // live: whether a server is actually reachable for this repo right now (so Save/Confirm work).
 // reason: one-line explanation when live is false, shown as a hint instead of failing silently.
 
@@ -190,7 +672,7 @@ export function render(state, ctx = {}) {
   // panel html is the caller's, trusted as-is.
   const extraTabs = (ctx.extraTabs || [])
     .map((t) => ({ ...t, id: String(t.id || "").toLowerCase().replace(/[^a-z0-9-]/g, "") }))
-    .filter((t) => t.id && !["overview", "findings", "questions", "steps", "gate"].includes(t.id));
+    .filter((t) => t.id && !["overview", "findings", "questions", "steps", "gate", ...(state._roadmap ? ["roadmap"] : [])].includes(t.id));
   const steps = state.steps || [];
   const done = steps.filter((s) => s.state === "done").length;
   const pct = steps.length ? Math.round((done / steps.length) * 100) : 0;
@@ -330,10 +812,67 @@ export function render(state, ctx = {}) {
   if (state.updated && !freshnessHtml) metaBits.push(`state updated ${esc(state.updated)}`);
   metaBits.push(`generated ${now.toLocaleTimeString()}`);
   metaBits.push("refreshes every 20s");
+  // --- The app itself. Running: one solid "Open" button for the primary (web-first) link, quieter
+  // chips for anything else answering. Registered-but-down ports are reference info: grouped by
+  // service name so web/api pairs sit together ("landing  web :5228  :8155"), and folded behind a
+  // <details> once there are more than a handful. Nothing registered: one muted line.
+  const appRows = ctx.app?.ports ?? [];
+  const appLinkable = appRows.filter((r) => r.up && r.url);
+  const appPrimary = appLinkable[0];
+  const appOtherUp = appRows.filter((r) => r.up && r !== appPrimary);
+  const appDown = appRows.filter((r) => !r.up);
+  const appName = (r) => r.short || r.label;
+  const appNewTab = `<span class="sr-only"> (opens in a new tab)</span>`;
+  const appUpChip = (r) =>
+    r.url
+      ? `<a class="app-link${r.web ? " web" : ""}" href="${esc(r.url)}" target="_blank" rel="noopener" title="${esc(r.label)}"><span class="app-dot" aria-hidden="true"></span><span class="app-label">${esc(appName(r))}</span> <span class="app-port">:${r.port}</span>${appNewTab}</a>`
+      : `<span class="app-port-chip up" title="${esc(r.label)} (answering)"><span class="app-dot" aria-hidden="true"></span><span class="app-label">${esc(appName(r))}</span> <span class="app-port">:${r.port}</span><span class="sr-only"> (answering)</span></span>`;
+  // "landing web" + "landing" -> one group "landing" with roles "web" and "".
+  const APP_ROLE = /[\s_-]+(web|api|ui|frontend|backend|server|client|dev|db|worker)$/i;
+  const appGroups = [];
+  for (const r of appDown) {
+    const name = appName(r);
+    const base = name.replace(APP_ROLE, "").trim() || name;
+    const role = name.slice(base.length).replace(/^[\s_-]+/, "");
+    let g = appGroups.find((x) => x.base.toLowerCase() === base.toLowerCase());
+    if (!g) appGroups.push((g = { base, ports: [] }));
+    g.ports.push({ ...r, role });
+  }
+  appGroups.sort((a, b) => a.base.localeCompare(b.base));
+  for (const g of appGroups) g.ports.sort((a, b) => b.web - a.web || a.port - b.port);
+  const appGroupChip = (g) =>
+    `<span class="app-grp"><span class="app-label">${esc(g.base)}</span>${g.ports
+      .map((p) => `<span class="app-pp" title="${esc(p.label)} (not running)">${p.role ? `${esc(p.role)} ` : ""}<span class="app-port">:${p.port}</span></span>`)
+      .join("")}</span>`;
+  const appDownHtml = (lead) => {
+    if (!appDown.length) return "";
+    const chips = `<span class="app-grps">${appGroups.map(appGroupChip).join("")}</span>`;
+    const n = appDown.length;
+    if (n <= 4) return `<span class="app-hint${lead === "not running" ? " app-sep" : ""}">${lead === "not running" ? "Not running" : lead}</span>${chips}`;
+    return `<details class="app-more${lead === "not running" ? " app-sep" : ""}"><summary>${lead === "registered ports" ? `${n} registered ports` : `${n} more registered, not running`}</summary>${chips}</details>`;
+  };
+  const appStateUp = `<span class="app-state up"><span class="app-dot" aria-hidden="true"></span>Running</span>`;
+  const appStateDown = `<span class="app-state"><span class="app-ring" aria-hidden="true"></span>Not running</span>`;
+  const appHtml = appRows.some((r) => r.up)
+    ? `<section class="app is-up" aria-label="The app">${appStateUp}${
+        appPrimary
+          ? `<a class="app-link web app-primary" href="${esc(appPrimary.url)}" target="_blank" rel="noopener" title="${esc(appPrimary.label)}">Open ${esc(appName(appPrimary))} <span class="app-port">:${appPrimary.port}</span>${appNewTab}</a>`
+          : ""
+      }${appOtherUp.map(appUpChip).join("")}${appDownHtml("not running")}</section>`
+    : `<section class="app${appRows.length ? "" : " is-empty"}" aria-label="The app">${appStateDown}${
+        appRows.length ? appDownHtml("registered ports") : `<span class="app-hint">no ports registered for this repo</span>`
+      }</section>`;
+
   metaBits.push(live ? `serving on <code>127.0.0.1:${port}</code>` : `read-only${reason ? ` (${esc(reason)})` : ""}`);
 
   // --- Open questions ---------------------------------------------------------------------
-  const questions = state.questions ?? [];
+  // Owner topics (origin "owner") are conversations the owner started; they wait on the build, so
+  // they never count as open questions, badge the tab or go through the severity filter.
+  const allQuestions = state.questions ?? [];
+  const questions = allQuestions.filter((q) => !isOwnerTopic(q));
+  const topics = allQuestions.filter(isOwnerTopic);
+  const openTopics = topics.filter((q) => !isSettled(q)).sort((a, b) => String(lastAt(b)).localeCompare(String(lastAt(a))));
+  const settledTopics = topics.filter(isSettled);
   const unanswered = questions
     .filter((q) => !q.answer)
     .sort((a, b) => (SEVERITY_RANK[b.severity] ?? 0) - (SEVERITY_RANK[a.severity] ?? 0));
@@ -380,6 +919,27 @@ export function render(state, ctx = {}) {
     return `<div class="qrec-row"><div class="qrec-text"><p class="qrec"><span class="qrec-label">Recommended:</span> ${esc(rec)}</p>${why ? `<p class="qwhy"><span class="qrec-label">Why:</span> ${esc(why)}</p>` : ""}</div><button class="qaccept-btn" data-id="${esc(q.id)}" data-rec="${esc(rec)}" ${live ? "" : "disabled"}>Accept recommendation</button></div>`;
   };
 
+  // The conversation around a question, oldest first, and a box to reply in. The owner's reply
+  // posts to /reply; the build's come from `build-status reply`. The box is a .qanswer-input, so a
+  // half-typed reply holds the refresh and survives it like an answer does.
+  const whenOf = (at) => (at ? new Date(at).toLocaleString() : "");
+  const threadHtml = (q) => {
+    const msgs = threadOf(q);
+    if (!msgs.length) return "";
+    return `<ol class="qthread" aria-label="Conversation">${msgs
+      .map(
+        (m) => `<li class="tmsg ${m.from}"><div class="tmeta"><span class="twho">${m.from === "owner" ? "You" : "The build"}</span>${m.via === "chat" ? " &middot; in chat" : ""}<span class="twhen">${esc(whenOf(m.at))}</span></div><p class="ttext">${esc(m.text)}</p></li>`,
+      )
+      .join("")}</ol>`;
+  };
+  const replyControls = (q, label = "Reply") => `
+      <div class="qreply-row"><textarea class="qanswer-input treply" data-id="__reply__:${esc(q.id)}" rows="2" aria-label="Reply to the build about this question" placeholder="Reply to the build&hellip;"${live ? "" : " disabled"}></textarea><button type="button" class="qreply-btn" data-id="${esc(q.id)}"${live ? "" : " disabled"}>${label}</button></div>`;
+  // On an agent's question the conversation folds under "Discuss", open once it has messages.
+  const discuss = (q) => {
+    const n = threadOf(q).length;
+    return `<details class="qdiscuss" data-id="${esc(q.id)}"${n ? " open" : ""}><summary>Discuss${n ? ` &middot; ${n} message${n === 1 ? "" : "s"}` : ""}</summary>${threadHtml(q)}${replyControls(q)}</details>`;
+  };
+
   const openQuestionCard = (q) => `
     <div class="qcard ${esc(q.severity)}" data-id="${esc(q.id)}" data-sev="${esc(q.severity ?? "")}">
       ${sevPill(q.severity)}
@@ -387,6 +947,29 @@ export function render(state, ctx = {}) {
       ${q.context ? `<p class="qctx">${esc(q.context)}</p>` : ""}
       ${recommendControl(q)}
       ${answerControls(q)}
+      ${discuss(q)}
+    </div>`;
+
+  // A topic the owner started: the whole thing is the conversation, plus Close (the owner is done
+  // with it; the same confirm as an answered question's). Acted on by the build also settles it.
+  const topicCard = (q) => {
+    const last = threadOf(q).at(-1);
+    const waiting = last?.from === "owner" ? "waiting for the build" : "the build replied";
+    return `
+    <div class="qcard qtopic" data-id="${esc(q.id)}">
+      <span class="qsev topic">your topic</span> <span class="tstate">${waiting}</span>
+      ${threadHtml(q)}
+      ${replyControls(q)}
+      <div class="qdone-row"><button type="button" class="qconfirm-btn" data-id="${esc(q.id)}" title="Done with this topic: hide it for good." ${live ? "" : "disabled"}>Close topic</button></div>
+    </div>`;
+  };
+  const askBoxHtml = `
+    <div class="card qask" id="ask-card">
+      <h2>Ask the build</h2>
+      <p class="qexplain qask-hint">Start a conversation about anything: a question, a worry, an idea. The build sees it the next time it checks for answers, and replies here.</p>
+      <textarea class="qanswer-input tbox" data-id="__topic__" rows="3" aria-label="Ask the build" placeholder="What would you like to ask or tell the build?"${live ? "" : " disabled"}></textarea>
+      <div class="qask-row"><button type="button" id="topic-send" class="csend-btn"${live ? "" : " disabled"}>Ask</button></div>
+      ${!live && reason ? `<div class="qhint">Read-only right now &mdash; ${esc(reason)}.</div>` : ""}
     </div>`;
 
   // How the answer got into the file: the page writes answeredVia "page", the CLI's chat
@@ -404,6 +987,7 @@ export function render(state, ctx = {}) {
       ${q.answerQuote && q.answerQuote !== q.answer ? `<blockquote class="qquote">${esc(q.answerQuote)}</blockquote>` : ""}
       <div class="qmeta">answered ${answeredHow(q)} ${esc(q.answeredAt ? new Date(q.answeredAt).toLocaleString() : "")}${q.editedAt ? " &middot; edited" : ""}</div>
       ${answeredControls(q)}
+      ${discuss(q)}
     </div>`;
 
   // Open first (worst severity first), then answered and still being worked, newest first. Settled
@@ -418,10 +1002,18 @@ export function render(state, ctx = {}) {
     .map((k) => `<button type="button" class="fpill" data-group="sev" data-value="${esc(k)}" aria-pressed="false"><span class="sev-dot ${esc(k)}" aria-hidden="true"></span>${k ? esc(k) : "no severity"} <span class="fcount">${sevCounts.get(k)}</span></button>`)
     .join("");
   const secCount = (n) => `<span class="qsec-count" data-total="${n}">${n}</span>`;
-  const settledNote = settled.length
-    ? `<p class="qsettled">${settled.length} settled question${settled.length === 1 ? "" : "s"} hidden: confirmed by you, or acted on by the build.</p>`
+  const settledCount = settled.length + settledTopics.length;
+  const settledNote = settledCount
+    ? `<p class="qsettled">${settledCount} settled question${settledCount === 1 ? "" : "s"} hidden: confirmed${settledTopics.length ? " or closed" : ""} by you, or acted on by the build.</p>`
     : "";
-  const questionsTabHtml = shownQuestions.length
+  const topicsHtml = openTopics.length
+    ? `
+    <div class="card qsection qtopics">
+      <h2>Your topics &middot; ${openTopics.length}</h2>
+      ${openTopics.map(topicCard).join("")}
+    </div>`
+    : "";
+  const questionsTabHtml = askBoxHtml + topicsHtml + (shownQuestions.length
     ? `
     <div class="qfilter-bar">
       <div class="fpills" role="group" aria-label="Filter questions by severity"><span class="fpills-label" aria-hidden="true">Severity</span>${sevPillsHtml}</div>
@@ -436,13 +1028,14 @@ export function render(state, ctx = {}) {
       ${working.length ? `<p class="qexplain">The build acts on an answer as soon as you give it; nothing waits for you to confirm. Edit changes your answer, and the build hears the new one. Confirm hides a question for good, and it hides by itself once the build has acted on it.</p>${working.map(answeredCard).join("")}` : `<div class="qempty">No answer is still being worked.</div>`}
     </div>
     ${settledNote}`
-    : `<div class="card"><div class="qempty">No open questions right now.</div>${settledNote}</div>`;
+    : `<div class="card"><div class="qempty">No open questions right now.</div>${settledNote}</div>`);
 
   const overviewQuestionsHtml = `
       <div class="qstats">
         <div class="qstat"><strong>${unanswered.length}</strong> open</div>
         <div class="qstat"><strong>${working.length}</strong> answered, being worked</div>
         <div class="qstat"><strong>${settled.length}</strong> settled</div>
+        ${openTopics.length ? `<div class="qstat"><strong>${openTopics.length}</strong> topic${openTopics.length === 1 ? "" : "s"} you started</div>` : ""}
       </div>
       ${
         unanswered.length
@@ -481,24 +1074,53 @@ export function render(state, ctx = {}) {
       ${open && live ? `<label class="cprio-change">Priority <select class="cprio-select" data-id="${esc(c.id)}" data-was="${p}">${prioOptions(p)}</select></label>` : ""}
     </li>`;
   };
+  // The box's Improve and Enrich queue the draft for the keeper, which rewrites it on its own model
+  // (prompt-improver's modes) and records the result; the latest open request shows under the box.
+  const REWRITE_LABEL = { improve: ["Improving", "Improved"], enrich: ["Enriching", "Enriched"] };
+  const rewriteOpen = (state.rewrites ?? []).filter((r) => r.status !== "closed" && REWRITE_LABEL[r.mode]).at(-1);
+  const rewriteHtml = (() => {
+    const r = rewriteOpen;
+    if (!r) return "";
+    const [ing, ed] = REWRITE_LABEL[r.mode];
+    const stale = r.status === "pending" && now - Date.parse(r.at ?? "") > REWRITE_STALE_MS;
+    const dismiss = live ? `<button type="button" class="linkbtn crw-close" data-id="${esc(r.id)}">Dismiss</button>` : "";
+    const head = (txt) => `<div class="crw-head">${txt}</div>`;
+    let body;
+    if (r.status === "done") {
+      body = `${head(`${ed} by the keeper`)}<p class="crw-text">${esc(r.result ?? "")}</p>
+        <div class="crw-actions">${live ? `<button type="button" class="crw-use" data-id="${esc(r.id)}" data-result="${esc(r.result ?? "")}">Use this</button>` : ""}${dismiss}</div>`;
+    } else if (r.status === "failed") {
+      body = `${head(`The keeper couldn't ${r.mode} it`)}<p class="crw-note">${esc(r.note ?? "")}</p><div class="crw-actions">${dismiss}</div>`;
+    } else if (stale) {
+      body = `${head(`${ing} &mdash; not picked up`)}<p class="crw-note">The keeper hasn't taken this up in 30 minutes; its watcher may not be running. Your draft is still in the box.</p><div class="crw-actions">${dismiss}</div>`;
+    } else {
+      body = `${head(`${ing} your draft&hellip;`)}<p class="crw-note">The keeper rewrites it on its own model: seconds while its watcher runs, otherwise at its next pass. Your draft stays in the box; the rewrite appears here.</p><div class="crw-actions">${dismiss}</div>`;
+    }
+    return `<div class="crw ${esc(r.status)}${stale ? " stale" : ""}" data-rid="${esc(r.id)}" data-status="${stale ? "stale" : esc(r.status)}">${body}</div>`;
+  })();
   const commentsCardHtml = `
     <div class="card" id="comments-card">
       <h2>Comments for the build${commentsOpen.length ? ` &middot; ${commentsOpen.length} open` : ""}</h2>
       <textarea class="qanswer-input cbox" data-id="__comment__" rows="3" aria-label="Comment for the build" placeholder="A change, an idea, something you noticed&hellip;"${live ? "" : " disabled"}></textarea>
-      <div class="ccompose-row"><label>Priority <select id="comment-priority"${live ? "" : " disabled"}>${prioOptions("normal")}</select></label><button type="button" id="comment-send" class="csend-btn"${live ? "" : " disabled"}>Send</button></div>
+      <div class="ccompose-row"><label>Priority <select id="comment-priority"${live ? "" : " disabled"}>${prioOptions("normal")}</select></label><span class="cbtns"><button type="button" class="crw-btn" data-mode="improve" title="The keeper tightens your draft: clearer, same scope"${live ? "" : " disabled"}>Improve</button><button type="button" class="crw-btn" data-mode="enrich" title="The keeper fills in context, constraints and what done looks like"${live ? "" : " disabled"}>Enrich</button><button type="button" id="comment-send" class="csend-btn"${live ? "" : " disabled"}>Send</button></span></div>
       <p class="chint" id="comment-prio-hint">${esc(COMMENT_HINTS.normal)}</p>
+      ${rewriteHtml}
       ${!live && reason ? `<div class="qhint">Read-only right now &mdash; ${esc(reason)}.</div>` : ""}
       ${commentsOpen.length ? `<ul class="clist">${commentsOpen.map(commentItem).join("")}</ul>` : ""}
       ${commentsClosed.length ? `<details class="cclosed"><summary>Handled &middot; ${commentsClosed.length}</summary><ul class="clist">${commentsClosed.map(commentItem).join("")}</ul></details>` : ""}
     </div>`;
+
+  // The Roadmap tab exists only when the state carries `_roadmap`; without it nothing below changes.
+  const roadmap = roadmapView(state, { live, reason });
 
   // The tabs, in order; the first is the default. The URL hash (#findings, #questions, …) opens
   // another, and the old #board lands on the Overview.
   const TABS = [
     { id: "overview", label: "Overview" },
     { id: "findings", label: "Findings", badge: findingsToday ? `<span class="badge info" title="${findingsToday} dated today">${findingsToday} today</span>` : "" },
-    { id: "questions", label: "Questions", badge: badgeHtml },
+    { id: "questions", label: "Q&amp;A", badge: badgeHtml },
     { id: "steps", label: "Steps" },
+    ...(roadmap ? [{ id: "roadmap", label: "Roadmap", badge: roadmap.badge }] : []),
     { id: "gate", label: measureRows ? "Measures &amp; gate" : "Gate" },
     ...extraTabs.map((t) => ({ id: t.id, label: esc(t.label || t.id), badge: t.badge ? `<span class="badge info">${esc(t.badge)}</span>` : "" })),
   ];
@@ -531,6 +1153,38 @@ export function render(state, ctx = {}) {
   .updated.stale{display:inline-block;background:#fff4e5;color:var(--ember-text);border:1px solid #f5c89a;border-radius:999px;padding:2px 10px}
   .upd-flag{margin-left:8px;font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;background:var(--ember-text);color:#fff;border-radius:999px;padding:1px 7px}
   .meta{color:var(--mut);font-size:12.5px;margin:6px 0 18px}
+  .app{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:10px 0 0;font-size:13px;color:var(--mut)}
+  .app.is-up{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:7px 10px 7px 12px;margin-top:12px}
+  .app.is-empty{font-size:12.5px}
+  .app-state{display:inline-flex;align-items:center;gap:6px;min-height:28px;align-self:flex-start;font-weight:600;color:var(--mut);margin-right:2px}
+  .app.is-up .app-state{min-height:32px}
+  .app.is-empty .app-state{min-height:0;align-self:center}
+  .app-state.up{color:#1d6b38}
+  .app-dot{flex:none;width:8px;height:8px;border-radius:50%;background:#2F9E55}
+  .app-state .app-dot{box-shadow:0 0 0 3px #d9f0e0}
+  .app-ring{flex:none;width:8px;height:8px;border-radius:50%;border:1.5px solid #9fb0c2}
+  .app-port{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+  .app-link,.app-port-chip{display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:2px 10px;border-radius:999px;border:1px solid #9cc3e0;background:#eef6fc;color:var(--navy);text-decoration:none;max-width:100%}
+  .app-port-chip{border-color:var(--line);background:#f2f7fb}
+  .app-link:hover{border-color:var(--blue-text)}
+  .app-link:focus-visible,.app-more>summary:focus-visible{outline:2px solid var(--blue-text);outline-offset:2px}
+  a.app-primary{min-height:32px;padding:4px 14px;border-radius:8px;border:0;background:var(--navy);color:#fff;font-weight:600;font-size:14px;overflow-wrap:anywhere}
+  a.app-primary .app-port{font-weight:400;opacity:.78}
+  a.app-primary:hover{background:var(--blue-text)}
+  .app-hint{color:var(--mut)}
+  .app-sep{border-left:1px solid var(--line);padding-left:10px;margin-left:2px}
+  .app-grps{display:inline-flex;flex-wrap:wrap;gap:6px;min-width:0}
+  .app-grp{display:inline-flex;align-items:center;flex-wrap:wrap;gap:2px 8px;min-height:26px;padding:1px 10px;border:1px dashed #c9d6e2;border-radius:999px;font-size:12.5px;color:var(--mut);max-width:100%}
+  .app-grp .app-label{color:#3d4f63}
+  .app-pp{white-space:nowrap}
+  .app-more{flex:1 1 220px;min-width:0;align-self:flex-start}
+  .app-more>summary{display:inline-flex;align-items:center;min-height:28px;cursor:pointer;color:var(--mut);font-size:12.5px;list-style:none;padding:0 4px;border-radius:6px}
+  .app-more>summary::-webkit-details-marker{display:none}
+  .app-more>summary::before{content:"";width:0;height:0;margin-right:7px;border-style:solid;border-width:4px 0 4px 6px;border-color:transparent transparent transparent currentColor;transition:transform .15s}
+  .app-more[open]>summary::before{transform:rotate(90deg)}
+  .app-more>summary:hover{color:var(--navy)}
+  .app-more .app-grps{display:flex;margin:4px 0 2px}
+  @media(prefers-reduced-motion:reduce){.app-more>summary::before{transition:none}}
   .meta code{background:#eaf1f7;padding:1px 6px;border-radius:4px;color:var(--navy)}
   .tabs{display:flex;gap:2px;margin-bottom:18px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:thin}
   .tab-btn{appearance:none;border:none;background:none;font:inherit;font-size:14px;font-weight:600;
@@ -612,7 +1266,7 @@ export function render(state, ctx = {}) {
   .seg-btn[aria-pressed="true"]{background:var(--navy);color:#fff}
   .seg-btn:focus-visible{outline-offset:-3px}
   .fpills{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0 0 8px}
-  .fpills-label{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--mut);font-weight:700;width:84px;flex:none}
+  .fpills-label{font-size:12px;letter-spacing:.07em;text-transform:uppercase;color:var(--mut);font-weight:700;width:84px;flex:none}
   .fpill{appearance:none;font:inherit;font-size:12.5px;line-height:1.3;padding:3px 10px;border-radius:99px;border:1px solid #c9d6e2;
          background:#fff;color:var(--navy);cursor:pointer;display:inline-flex;align-items:center;gap:5px}
   .fpill:hover{border-color:var(--blue-text)}
@@ -680,7 +1334,7 @@ export function render(state, ctx = {}) {
   .qcard.red{border-left-color:var(--ember)} .qcard.amber{border-left-color:var(--sun)} .qcard.green{border-left-color:var(--green)}
   .qcard .qtext{font-size:14.5px;font-weight:600;color:var(--ink);margin:6px 0}
   .qcard .qctx{font-size:13px;color:var(--mut);margin:0 0 10px}
-  .qsev{display:inline-block;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;
+  .qsev{display:inline-block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;
         padding:1px 8px;border-radius:99px;border:1px solid var(--line);background:#f2f5f8;color:#3b4b5e;vertical-align:middle}
   .qsev.red{background:#fde9db;border-color:#f7c9a3;color:#8a3c06}
   .qsev.amber{background:#fff4e2;border-color:#ffd79a;color:#6b4708}
@@ -721,6 +1375,18 @@ export function render(state, ctx = {}) {
   .csend-btn{padding:7px 16px;border:none;border-radius:6px;background:var(--blue-text);color:#fff;font-weight:600;font-size:13.5px;cursor:pointer}
   .cbox:disabled,.ccompose-row select:disabled,.csend-btn:disabled{opacity:.55;cursor:not-allowed}
   .chint{font-size:12px;color:var(--mut);margin:6px 0 0}
+  .ccompose-row{flex-wrap:wrap}
+  .cbtns{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .crw-btn,.crw-use{padding:6px 12px;min-height:30px;border:1px solid var(--blue-text);border-radius:6px;background:#fff;color:var(--blue-text);font-weight:600;font-size:13px;cursor:pointer}
+  .crw-use{background:var(--blue-text);color:#fff}
+  .crw-btn:disabled{opacity:.55;cursor:not-allowed}
+  .crw{margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-left:3px solid var(--blue-text);border-radius:6px;background:#f6f9fc;font-size:13px}
+  .crw.failed,.crw.stale{border-left-color:var(--ember-text)}
+  .crw-head{font-weight:700;color:var(--navy);margin-bottom:4px}
+  .crw-text{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0 8px;font-size:13.5px;color:var(--ink)}
+  .crw-note{margin:2px 0 6px;color:var(--mut);font-size:12.5px}
+  .crw-actions{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .crw-actions .linkbtn{min-height:24px}
   .clist{list-style:none;margin:12px 0 0;padding:0}
   .citem{border:1px solid var(--line);border-left:4px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
   .citem.urgent{border-left-color:var(--ember)} .citem.high{border-left-color:var(--sun)} .citem.normal{border-left-color:var(--blue)}
@@ -732,9 +1398,31 @@ export function render(state, ctx = {}) {
   .ctext{margin:5px 0 2px;font-size:13.5px;white-space:pre-wrap;overflow-wrap:anywhere}
   .cnote{margin:3px 0 0;font-size:12.5px;color:#4a5d70}
   .cprio-change{display:inline-block;margin-top:4px;font-size:12px;color:var(--mut)}
-  .cclosed{margin-top:10px} .cclosed summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--navy)}
+  .qdiscuss{margin-top:10px;border-top:1px solid #eef3f7;padding-top:6px}
+  .qdiscuss>summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--blue-text);padding:5px 0;line-height:1.4}
+  .qthread{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+  .tmsg{max-width:92%;padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:#fff;overflow-wrap:anywhere}
+  .tmsg.owner{align-self:flex-end;background:#e8f3fb;border-color:#c4e0f3}
+  .tmsg.agent{align-self:flex-start;background:#f6f8fa}
+  .tmeta{display:flex;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--mut)}
+  .twho{font-weight:700;color:var(--navy)} .twhen{margin-left:auto}
+  .ttext{margin:3px 0 0;font-size:13.5px;color:#243546;white-space:pre-wrap}
+  .qreply-row{display:flex;gap:8px;margin-top:8px;align-items:flex-end}
+  .qreply-row textarea{flex:1;min-width:0;resize:vertical;padding:7px 10px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13.5px}
+  .qreply-row button{padding:7px 14px;min-height:32px;border:none;border-radius:6px;background:var(--blue-text);color:#fff;font-weight:600;font-size:13.5px;cursor:pointer}
+  .qreply-row button:disabled,.qreply-row textarea:disabled,.tbox:disabled{opacity:.55;cursor:not-allowed}
+  .qtopic{border-left-color:var(--blue)}
+  .qsev.topic{background:#e8f3fb;border-color:#c4e0f3;color:#0A5A92}
+  .tstate{font-size:12px;color:var(--mut);margin-left:6px}
+  .tbox{display:block;width:100%;resize:vertical;min-height:64px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13.5px}
+  .qask-row{display:flex;justify-content:flex-end;margin-top:8px}
+  .qask-hint{border-bottom:none;padding-bottom:0;margin-bottom:8px}
+  .qanswer-row input[type=text]{min-width:0}
+  @media(max-width:480px){.qanswer-row,.qrec-row{flex-wrap:wrap}.qanswer-row button{min-height:32px}.tmsg{max-width:100%}}
+  .cclosed{margin-top:10px} .cclosed summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--navy)}${roadmap ? ROADMAP_CSS : ""}
 </style></head><body><div class="wrap">
 ${freshnessHtml}<header><h1>${esc(title)}</h1>${state.phase ? `<span class="phase">${esc(state.phase)}</span>` : ""}</header>
+${appHtml}
 <div class="meta">${metaBits.join(" &middot; ")}</div>
 <div class="tabs" role="tablist" aria-label="Build status">
   ${TABS.map((t, i) => `<button type="button" class="tab-btn${i === 0 ? " active" : ""}" role="tab" id="tabbtn-${t.id}" aria-controls="tab-${t.id}" aria-selected="${i === 0 ? "true" : "false"}" tabindex="${i === 0 ? "0" : "-1"}" data-tab="${t.id}">${t.label}${t.badge || ""}</button>`).join("\n  ")}
@@ -796,7 +1484,7 @@ ${historyHtml}
     ${measureRows ? `<div class="card"><h2>Measures</h2><table>${measureRows}</table></div>` : ""}
 </div>
 ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" aria-labelledby="tabbtn-${t.id}" tabindex="0">${t.html || ""}</div>`).join("\n")}
-<footer>Local build view &middot; generated by build-status${build ? ` ${esc(build)}` : ""} &middot; not committed</footer>
+${roadmap ? roadmap.panelHtml : ""}<footer>Local build view &middot; generated by build-status${build ? ` ${esc(build)}` : ""} &middot; not committed</footer>
 </div>
 <div id="finding-bodies" hidden>${findingBodiesHtml}</div>
 <div id="finding-modal-backdrop" class="modal-backdrop" hidden>
@@ -971,6 +1659,140 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
         sel.value = sel.getAttribute("data-was");
       });
     });
+  });
+
+  // --- Improve / Enrich: queue the box's draft for the keeper's rewrite; the draft stays where it
+  // is. Use this puts the rewrite in the box (for the owner to edit and Send); Dismiss drops it.
+  // While a request is pending, a light poll reloads as soon as the keeper's result lands.
+  function postRewrite(body, onFail, beforeReload){
+    savesInFlight++;
+    fetch("/rewrite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function(r){
+      if (!r.ok) return r.json().catch(function(){ return {}; }).then(function(j){ throw new Error(j.error || ("request failed (" + r.status + ")")); });
+      if (beforeReload) beforeReload();
+      saveScroll();
+      location.reload();
+    }).catch(function(err){
+      savesInFlight--;
+      if (onFail) onFail();
+      alert("Could not ask the keeper: " + err.message);
+    });
+  }
+  document.querySelectorAll(".crw-btn").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      if (btn.disabled || !cbox) return;
+      var text = (cbox.value || "").trim();
+      if (!text) { cbox.focus(); return; }
+      var drafts = readJson("sessionStorage", DKEY) || {};
+      drafts["__comment__"] = cbox.value;
+      writeJson("sessionStorage", DKEY, drafts);
+      btn.disabled = true;
+      var prevLabel = btn.textContent;
+      btn.textContent = "Asking…";
+      postRewrite({ text: text, mode: btn.getAttribute("data-mode") }, function(){ btn.disabled = false; btn.textContent = prevLabel; });
+    });
+  });
+  document.querySelectorAll(".crw-use").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      if (btn.disabled) return;
+      btn.disabled = true;
+      var result = btn.getAttribute("data-result") || "";
+      postRewrite({ id: btn.getAttribute("data-id"), close: true }, function(){ btn.disabled = false; }, function(){
+        var drafts = readJson("sessionStorage", DKEY) || {};
+        drafts["__comment__"] = result;
+        writeJson("sessionStorage", DKEY, drafts);
+      });
+    });
+  });
+  document.querySelectorAll(".crw-close").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      if (btn.disabled) return;
+      btn.disabled = true;
+      postRewrite({ id: btn.getAttribute("data-id"), close: true }, function(){ btn.disabled = false; });
+    });
+  });
+  (function watchRewrite(){
+    var box = document.querySelector('.crw[data-status="pending"]');
+    if (!box || !window.fetch) return;
+    var marker = 'data-rid="' + box.getAttribute("data-rid") + '" data-status="pending"';
+    var timer = setInterval(function(){
+      if (savesInFlight > 0) return;
+      fetch(location.pathname, { cache: "no-store" }).then(function(r){ return r.ok ? r.text() : null; }).then(function(html){
+        if (html == null || html.indexOf(marker) >= 0) return;
+        clearInterval(timer);
+        if (cbox) {
+          var drafts = readJson("sessionStorage", DKEY) || {};
+          if (cbox.value) drafts["__comment__"] = cbox.value;
+          writeJson("sessionStorage", DKEY, drafts);
+        }
+        saveScroll();
+        location.reload();
+      }).catch(function(){});
+    }, 4000);
+  })();
+
+  // --- Q&A threads: Reply posts the box under a question to /reply; Ask posts the "Ask the build"
+  // box to /topic as a new owner topic. Both clear their draft only once the save lands.
+  function postThread(path, body, draftKey, btn, prevLabel){
+    savesInFlight++;
+    fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function(r){
+      if (!r.ok) return r.json().catch(function(){ return {}; }).then(function(j){ throw new Error(j.error || ("send failed (" + r.status + ")")); });
+      var drafts = readJson("sessionStorage", DKEY) || {};
+      delete drafts[draftKey];
+      writeJson("sessionStorage", DKEY, drafts);
+      location.reload();
+    }).catch(function(err){
+      savesInFlight--;
+      btn.disabled = false;
+      btn.textContent = prevLabel;
+      alert("Could not send: " + err.message);
+    });
+  }
+  function sendReply(btn){
+    if (!btn || btn.disabled) return;
+    var id = btn.getAttribute("data-id");
+    var key = "__reply__:" + id, input = null;
+    document.querySelectorAll(".treply").forEach(function(el){ if (el.getAttribute("data-id") === key) input = el; });
+    if (!input) return;
+    var text = (input.value || "").trim();
+    if (!text) { input.focus(); return; }
+    btn.disabled = true;
+    var prevLabel = btn.textContent;
+    btn.textContent = "Sending…";
+    postThread("/reply", { id: id, text: text }, key, btn, prevLabel);
+  }
+  document.querySelectorAll(".qreply-btn").forEach(function(btn){
+    btn.addEventListener("click", function(){ sendReply(btn); });
+  });
+  document.querySelectorAll(".treply").forEach(function(input){
+    input.addEventListener("keydown", function(e){
+      if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      var row = input.parentNode;
+      sendReply(row ? row.querySelector(".qreply-btn") : null);
+    });
+  });
+  var tbox = document.querySelector(".tbox");
+  var tsend = document.getElementById("topic-send");
+  function sendTopic(){
+    if (!tsend || tsend.disabled || !tbox) return;
+    var text = (tbox.value || "").trim();
+    if (!text) { tbox.focus(); return; }
+    tsend.disabled = true;
+    var prevLabel = tsend.textContent;
+    tsend.textContent = "Sending…";
+    postThread("/topic", { text: text }, "__topic__", tsend, prevLabel);
+  }
+  if (tsend) tsend.addEventListener("click", sendTopic);
+  if (tbox) tbox.addEventListener("keydown", function(e){
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendTopic(); }
   });
 
   // Finding detail modal — bodies are pre-rendered server-side (escaped) into hidden
@@ -1180,7 +2002,7 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
     if (saved && Array.isArray(saved.sev)) qview.sev = saved.sev.map(String).filter(function(v){ return !!document.querySelector('#tab-questions .fpill[data-value="' + v + '"]'); });
   })();
   function applyQuestions(){
-    var cards = document.querySelectorAll("#tab-questions .qcard");
+    var cards = document.querySelectorAll("#tab-questions .qcard:not(.qtopic)");
     var total = cards.length, shown = 0;
     cards.forEach(function(c){
       var ok = !qview.sev.length || qview.sev.indexOf(c.getAttribute("data-sev")) !== -1;
@@ -1188,7 +2010,7 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
       if (ok) shown++;
     });
     document.querySelectorAll("#tab-questions .qsection").forEach(function(sec){
-      var n = sec.querySelectorAll(".qcard:not([hidden])").length;
+      var n = sec.querySelectorAll(".qcard:not(.qtopic):not([hidden])").length;
       var countEl = sec.querySelector(".qsec-count");
       if (!countEl) return;
       var tot = countEl.getAttribute("data-total");
@@ -1231,6 +2053,15 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
   }
   tickUpdated();
   setInterval(tickUpdated, 30000);
+
+  // --- App strip: the folded port list stays open (or shut) across the 20s reload.
+  (function(){
+    var more = document.querySelector("details.app-more");
+    if (!more) return;
+    var AKEY = STORE + ":app-more";
+    if (readJson("sessionStorage", AKEY)) more.open = true;
+    more.addEventListener("toggle", function(){ writeJson("sessionStorage", AKEY, more.open); });
+  })();
 
   // --- Scroll: kept across a reload (the 20s refresh, or the reload after saving an answer) on
   // the same tab. A fresh visit starts at the top.
@@ -1295,14 +2126,16 @@ ${extraTabs.map((t) => `<div id="tab-${t.id}" class="tabpanel" role="tabpanel" a
         input.value = drafts[id];
         var row = input.closest ? input.closest(".qedit-row") : null;
         if (row) row.hidden = false;
+        var fold = input.closest ? input.closest("details.qdiscuss") : null;
+        if (fold) fold.open = true;
       } else delete drafts[id];
     });
     writeJson("sessionStorage", DKEY, drafts);
-  })();
+  })();${roadmap ? ROADMAP_SCRIPT : ""}
   function refreshSuspended(){
     if (anySavePending()) return true;
     if (Date.now() - lastActivityAt > IDLE_MS) return false;
-    return anyFieldFocused() || anyFieldDirty() || modalOpen;
+    return anyFieldFocused() || anyFieldDirty() || modalOpen${roadmap ? " || rmPanelOpen()" : ""};
   }
   setInterval(function(){
     var now = Date.now();

@@ -3,20 +3,40 @@
 // static file:// copy, which is the one generated file, and keeps it out of git.
 import { closeSync, fsyncSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { basename, relative } from "node:path";
+import { appPorts } from "./app.mjs";
 import { gitContext } from "./git.mjs";
 import { buildId, checkoutFile, git } from "./paths.mjs";
 import { render } from "./render.mjs";
+import { applyRequests, roadmapView } from "./roadmap.mjs";
 import { loadState } from "./state.mjs";
+
+export function roadmapOverlay(root, requests) {
+  try {
+    return applyRequests(roadmapView(root), requests);
+  } catch (err) {
+    return { source: null, readAt: new Date().toISOString(), error: `the roadmap couldn't be read: ${err.message}`, sections: [], unmatched: [] };
+  }
+}
 
 export async function renderPage(co, loc, srv = {}) {
   const { state } = await loadState(loc.statePath);
+  // For render only, never written back: the repo's roadmap with the owner's open requests on it.
+  state._roadmap = roadmapOverlay(co.root, state.roadmapRequests);
+  const repo = state.repo || basename(co.root);
+  // The page's own daemon also listens from inside the checkout; it's not the app.
+  let ownPort = null;
+  try {
+    ownPort = Number(readFileSync(checkoutFile(co, "build-status.port"), "utf8").trim()) || null;
+  } catch {}
+  const app = await appPorts(co.root, repo, { exclude: [srv.port, ownPort].filter(Boolean) });
   const out = render(state, {
-    title: state.repo || basename(co.root),
+    title: repo,
     live: Boolean(srv.live),
     port: srv.port ?? null,
     reason: srv.reason || "",
     build: buildId(),
     git: gitContext(co.root),
+    app,
   });
   const summary = {
     repo: state.repo || basename(co.root),

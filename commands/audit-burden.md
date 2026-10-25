@@ -2,6 +2,8 @@
 description: Find features carrying technical cost, architectural weight, or delivery constraints disproportionate to their actual value — then trace each back through Claude Code session history to the utterance that created it and determine whether that origin was ever deliberately ratified. Session transcripts are the primary provenance source; git is secondary (what/when, not who/why). Read-only; never edits, refactors, or fixes. Fire on `/audit-burden`, "what's carrying more weight than it earned," or "why are we stuck with X."
 argument-hint: "[optional: feature, area, file path, recent decision, or 'the thing that feels wrong' in your words]"
 allowed-tools: Read, Glob, Grep, Bash(ls:*), Bash(jq:*), Bash(rg:*), Bash(wc:*), Bash(find:*), Bash(sqlite3:*), Bash(git log:*), Bash(git show:*), Bash(git diff:*), Bash(git blame:*)
+context: fork
+background: false
 ---
 
 # Feature burden and inherited-constraint audit
@@ -220,6 +222,8 @@ session first discussed the feature; otherwise `rg -l` across the `.jsonl` files
 - Which sessions mention the feature at all:
   `rg -l -i '<feature term>' ~/.claude/projects/<encoded-cwd>/`
 - Then read narrowly around the hits.
+
+**Coverage — cloud sessions don't land here.** Sessions started in the iOS app, on claude.ai or from another cloud session never reach `~/.claude/projects/` unless teleported. Add one **coverage** line to the report saying which sessions it could see (local transcripts, vault, or both) and that cloud sessions are absent. When this runs inside a cloud session, read cloud transcripts with the remote session tools (`list_sessions`, `list_events`) if they're available. Where the owner has pasted `/insights` output, cross-check session totals against it.
 
 **The vault — deep history beyond the pruning window.** Live transcripts under
 `~/.claude/projects/` are pruned after ~30 days. I archive everything to a

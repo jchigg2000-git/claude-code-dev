@@ -1,7 +1,8 @@
 ---
-description: Write a dated, standalone session handoff document. FIRES ONLY WHEN EXPLICITLY INVOKED as /handoff-to-next — never proactively, never inferred from "wrap up", "I'm done", "clean the context", or the end of a long session. Complements /roadmap rather than replacing it: the roadmap holds the open set, this holds the session narrative.
+description: Write a dated, standalone session handoff document. Runs only when typed as /handoff-to-next. Complements /roadmap rather than replacing it: the roadmap holds the open set, this holds the session narrative.
 argument-hint: "[optional: a note about what this session was, or a target path]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep
+disable-model-invocation: true
 ---
 
 # Handoff to next
@@ -44,6 +45,7 @@ statement id. A handoff that cannot be checked is worse than none.
 
 ```markdown
 # Handoff — YYYY-MM-DD · <what this session was>
+Session: <session id, plus the session URL if this is a cloud session>
 
 ## State
 Branch, clean/dirty, last commit SHA, what is deployed, what tests were run and their result.
@@ -70,6 +72,12 @@ Ranked, each with a next action and a cost. If ROADMAP.md exists, link to it ins
 
 ## Questions for the owner
 Each answerable in one line.
+
+## Other ways to continue
+- `/recap` — a one-line summary of this session.
+- `/branch` — fork this conversation at this point.
+- `/fork <directive>` — send a copy off as a background session.
+- Cloud session: `claude --teleport <session id>` pulls it onto the Mac.
 ```
 
 ## Rules

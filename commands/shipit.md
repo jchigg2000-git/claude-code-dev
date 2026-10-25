@@ -1,7 +1,7 @@
 ---
-description: Ship the working tree to main — fast git-only pipeline: guard secrets/large files → branch (if on main) → commit → push → merge to main → push main → delete local+remote branch. Fast by default; pass `--check` (or `--full`) to also run the hygiene + sysdoc gates and gen-sys-doc regen. Pass `--prod` (alias `--promote`) to then fast-forward the repo's long-lived deploy branch (default `production`) to main — the deliberate prod gate in staging/production repos. Stops cleanly on anything weird with a precise "where the work is now" report. Fires on `/shipit` and natural-language ship requests ("ship it", "ship this", "ship and merge"). Not for commit-only / push-only / merge-only.
-allowed-tools: Bash(git:*), Bash(python3:*)
-argument-hint: [branch-if-on-main] [commit-message] [--check] [--prod]
+description: Ship the working tree to main — fast git-only pipeline: guard secrets/large files → branch (if on main) → commit → push → merge to main → push main → delete local+remote branch. Fast by default; pass `--check` (or `--full`) to also run the hygiene + sysdoc gates and gen-sys-doc regen. Pass `--prod` (alias `--promote`) to then fast-forward the repo's long-lived deploy branch (default `production`) to main — the deliberate prod gate in staging/production repos. Opt-in: `--review` runs `/code-review medium --fix` before committing; `--pr` opens a PR instead of merging. Stops cleanly on anything weird with a precise "where the work is now" report. Fires on `/shipit` and natural-language ship requests ("ship it", "ship this", "ship and merge"). Not for commit-only / push-only / merge-only.
+allowed-tools: Bash(git:*), Bash(python3:*), Bash(gh pr create:*)
+argument-hint: [branch-if-on-main] [commit-message] [--check] [--prod] [--review] [--pr]
 ---
 
 # Ship it (fast)
@@ -50,6 +50,12 @@ Ship the working tree to `main` with the **fewest possible commands**. **Stop im
 - `python3 ~/.claude/skills/shipit/hygiene-check.py --root "$(git rev-parse --show-toplevel)"` — exit 1 → stop, surface its output (it prints the failures + an auto-fix command for env drift; don't auto-apply).
 - `python3 ~/.claude/skills/shipit/sysdoc-gate.py --root "$(git rev-parse --show-toplevel)"` — exit 1 → the change is structural; run `/gen-sys-doc --no-pdf`, then include the regenerated doc in the commit.
 
+## Optional review (only if `--review` in args)
+Before staging, run `/code-review medium --fix` on the working-tree diff. If it changed files, re-read
+`git status --short` once (the pre-gathered state is now stale for those paths) and run the secret /
+large-file guard again on the new list. If it reports a correctness bug it could not fix → stop-clean
+and list it; don't ship around it.
+
 ## Pipeline (chain into ~1–2 Bash calls)
 1. Main mode only: `git checkout -b <branch>`.
 2. Stage per the guard above, then commit. Commit message: use the message arg verbatim as subject.
@@ -64,6 +70,14 @@ Ship the working tree to `main` with the **fewest possible commands**. **Stop im
 5. `git merge --ff-only <branch> || git merge --no-ff <branch>`  *(conflict → `git merge --abort`, stay on main, stop-clean)*
 6. `git push`  *(rejected/protected → stop-clean; do not open a PR, do not retry)*
 7. **Verify then delete:** confirm `<tip-sha>` is on `origin/main` (`git merge-base --is-ancestor <tip> origin/main`), then `git branch -d <branch> && git push origin --delete <branch>`. Remote-delete failure → report under **skipped** and continue (work is already on `origin/main`).
+
+## PR mode (only if `--pr` in args)
+Run pipeline steps 1–3 as normal, then **replace steps 4–7**: open a PR from the pushed branch with the
+bundled `/pr` skill if it's available, otherwise `gh pr create --fill --base main`. Don't merge and
+don't delete the branch; the PR is where Claude Code Review and the PR bots see the change. If
+`/autofix-pr` is available, name it in the report as the way to watch CI and review comments. In the report, replace "what landed on
+`origin/main`" with the PR URL. `--pr` and `--prod` together → stop-clean before step 1: promotion needs
+the work on `main`, and `--pr` keeps it off.
 
 ## Promotion (only if `--prod` / `--promote` in args)
 
@@ -90,7 +104,7 @@ In the report, add a **promoted** bucket: deploy branch name, the SHA now on it,
 `--no-verify`, `--force` / `--force-with-lease`, `reset --hard`, `clean -fd`, `checkout .`, `branch -D`, any `-i` flag. Single attempt per command (the one exception is the pre-commit-hook re-stage in step 2). **Never delete, force-push, or create the promotion deploy branch.**
 
 ## Report
-Branch name, commit SHA, what landed on `origin/main`, and buckets: **done / skipped** (secret-guarded files, remote-prune failures) **/ stop-clean** (exact state, where every piece of work lives). State whether the optional gates ran.
+Branch name, commit SHA, what landed on `origin/main`, and buckets: **done / skipped** (secret-guarded files, remote-prune failures) **/ stop-clean** (exact state, where every piece of work lives). State whether the optional gates and `--review` ran.
 
 End the report there. No closing question, no offer of next steps, no asking whether the prompt meant
 something else or whether a re-sent/duplicate request was intended. If the work was already shipped, say

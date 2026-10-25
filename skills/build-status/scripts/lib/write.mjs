@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { checkoutFile, ensureDir, homePath, localDate, localIso } from "./paths.mjs";
+import { isOwnerTopic, REWRITE_STALE_MS } from "./normalize.mjs";
 export { isSettled } from "./normalize.mjs";
 
 export class LockTimeout extends Error {
@@ -418,7 +419,7 @@ const answered = (q) => q.answer != null && String(q.answer).trim() !== "";
 // The owner's Confirm: done with this question; the page hides it for good. Only the page sets it.
 export function setConfirmed(raw, id) {
   const q = findQuestion(raw, id);
-  if (!answered(q)) throw new Conflict(`question "${q.id}" has no answer to confirm`);
+  if (!answered(q) && !isOwnerTopic(q)) throw new Conflict(`question "${q.id}" has no answer to confirm`);
   if (q.confirmed) return { changed: false, id: q.id };
   q.confirmed = true;
   q.confirmedAt = localIso();
@@ -429,13 +430,63 @@ export function setConfirmed(raw, id) {
 // decision is recorded. The page hides it; the note says what was done.
 export function setActed(raw, id, note) {
   const q = findQuestion(raw, id);
-  if (!answered(q)) throw new Conflict(`question "${q.id}" isn't answered yet`);
+  if (!answered(q) && !isOwnerTopic(q)) throw new Conflict(`question "${q.id}" isn't answered yet`);
   const what = String(note ?? "").trim();
   if (q.actedAt && (q.actedNote ?? "") === what) return { changed: false, id: q.id };
   q.actedAt = localIso();
   if (what) q.actedNote = what;
   else delete q.actedNote;
   return { changed: true, id: q.id };
+}
+
+// ---- threads: the conversation around a question (SKILL.md §5). Messages are appended, never
+// edited; ids are m1, m2, … within the question. The same text as the thread's last message from
+// the same side is a no-op, so a double-clicked Reply can't post it twice.
+export const THREAD_MAX = 8000;
+
+function threadText(text) {
+  const body = String(text ?? "").trim();
+  if (!body) throw new Conflict("a message can't be empty");
+  if (body.length > THREAD_MAX) throw new Conflict(`a message is at most ${THREAD_MAX} characters`);
+  return body;
+}
+
+function pushMessage(q, from, body, via) {
+  if (!Array.isArray(q.thread)) q.thread = [];
+  const last = q.thread.at(-1);
+  if (last && last.from === from && last.text === body) return { changed: false, id: q.id, msgId: last.id, note: "already posted" };
+  const n = q.thread.reduce((m, x) => Math.max(m, Number(/^m(\d+)$/.exec(String(x?.id))?.[1]) || 0), 0) + 1;
+  q.thread.push({ id: `m${n}`, from, text: body, at: localIso(), ...(via ? { via } : {}) });
+  return { changed: true, id: q.id, msgId: `m${n}` };
+}
+
+// A message on an existing question's thread: the owner's from the page, the agent's from the CLI.
+export function addThreadMessage(raw, id, { from, text, via }) {
+  if (from !== "owner" && from !== "agent") throw new Conflict('from is "owner" or "agent"');
+  return pushMessage(findQuestion(raw, id), from, threadText(text), via);
+}
+
+// The owner starting a topic from the page's "Ask the build" box: a question with origin "owner",
+// no severity and no recommendation, whose first thread message is the owner's text. The title is
+// that text's first line, clipped. The same text as an open topic's opening message is a no-op.
+export function addOwnerTopic(raw, { text, via = "page" }) {
+  const body = threadText(text);
+  const list = arr(raw, "questions");
+  const dup = list.find((q) => q && isOwnerTopic(q) && !q.confirmed && !q.actedAt && Array.isArray(q.thread) && q.thread[0]?.text === body);
+  if (dup) return { changed: false, id: dup.id, note: "already posted" };
+  const n = list.reduce((m, q) => Math.max(m, Number(/^t(\d+)$/.exec(String(q?.id))?.[1]) || 0), 0) + 1;
+  const first = body.split("\n")[0].trim();
+  const at = localIso();
+  list.push({
+    id: uniqueId(list, `t${n}`),
+    origin: "owner",
+    question: first.length > 140 ? `${first.slice(0, 139)}…` : first,
+    answer: null,
+    answeredAt: null,
+    askedAt: at,
+    thread: [{ id: "m1", from: "owner", text: body, at, via }],
+  });
+  return { changed: true, id: list.at(-1).id, msgId: "m1" };
 }
 
 // ---- comments: the owner's notes to the build, typed into the page (or recorded from chat). The
@@ -495,6 +546,183 @@ export function setCommentPriority(raw, id, priority) {
   c.status = "new";
   c.statusAt = at;
   return { changed: true, id: c.id };
+}
+
+// ---- rewrites: the comment box's Improve and Enrich buttons. The page queues the owner's draft
+// as `pending`; @keeper rewrites it on its own model (prompt-improver's Improve or Enrich) and
+// records the result, which the page offers beside the box. Nothing here is a comment: the owner
+// still edits and Sends. A request left pending past REWRITE_STALE_MS stops waking watchers.
+export const REWRITE_MODES = ["improve", "enrich"];
+export { REWRITE_STALE_MS };
+const REWRITE_KEEP_CLOSED = 5;
+
+function findRewrite(raw, id) {
+  const r = arr(raw, "rewrites").find((x) => x && String(x.id) === String(id));
+  if (!r) throw new Conflict(`no rewrite with id "${id}"`);
+  return r;
+}
+
+// Keeps every open request and only the last few closed ones, so the state file doesn't grow.
+function pruneRewrites(raw) {
+  const list = arr(raw, "rewrites");
+  const closed = list.filter((r) => r?.status === "closed");
+  const drop = new Set(closed.slice(0, Math.max(0, closed.length - REWRITE_KEEP_CLOSED)));
+  raw.rewrites = list.filter((r) => r && !drop.has(r));
+}
+
+// The same draft and mode still pending is a no-op, so a double click can't queue it twice. A new
+// request supersedes any earlier open one: the box only ever offers the latest.
+export function requestRewrite(raw, { text, mode }) {
+  const body = String(text ?? "").trim();
+  if (!body) throw new Conflict("there's nothing in the box to rewrite");
+  if (body.length > COMMENT_MAX) throw new Conflict(`a comment is at most ${COMMENT_MAX} characters`);
+  if (!REWRITE_MODES.includes(mode)) throw new Conflict(`mode is ${REWRITE_MODES.join(" or ")}`);
+  const list = arr(raw, "rewrites");
+  const dup = list.find((r) => r && r.status === "pending" && r.text === body && r.mode === mode);
+  if (dup) return { changed: false, id: dup.id, note: "already queued" };
+  const at = localIso();
+  for (const r of list) if (r && r.status !== "closed") Object.assign(r, { status: "closed", closedAt: at });
+  const n = list.reduce((m, r) => Math.max(m, Number(/^r(\d+)$/.exec(String(r?.id))?.[1]) || 0), 0) + 1;
+  list.push({ id: `r${n}`, mode, text: body, at, status: "pending" });
+  pruneRewrites(raw);
+  return { changed: true, id: `r${n}` };
+}
+
+// The keeper's result, or why it couldn't (`failed` with a note the page shows).
+export function setRewrite(raw, id, { result, fail }) {
+  const r = findRewrite(raw, id);
+  if (r.status === "closed") throw new Conflict(`rewrite "${r.id}" is closed (the owner moved on)`);
+  const at = localIso();
+  if (fail != null) {
+    const why = String(fail).trim();
+    if (!why) throw new Conflict("a failed rewrite needs a note saying why");
+    Object.assign(r, { status: "failed", note: why, doneAt: at });
+    delete r.result;
+    return { changed: true, id: r.id };
+  }
+  const body = String(result ?? "").trim();
+  if (!body) throw new Conflict("a rewrite can't be empty");
+  if (body.length > COMMENT_MAX) throw new Conflict(`a rewrite is at most ${COMMENT_MAX} characters`);
+  if (r.status === "done" && r.result === body) return { changed: false, id: r.id };
+  Object.assign(r, { status: "done", result: body, doneAt: at });
+  delete r.note;
+  return { changed: true, id: r.id };
+}
+
+// The owner used it or dismissed it; either way the box stops offering it.
+export function closeRewrite(raw, id) {
+  const r = findRewrite(raw, id);
+  if (r.status === "closed") return { changed: false, id: r.id };
+  Object.assign(r, { status: "closed", closedAt: localIso() });
+  pruneRewrites(raw);
+  return { changed: true, id: r.id };
+}
+
+// Pending and still fresh enough to wake a watcher.
+export const isLiveRewrite = (r, now = Date.now()) =>
+  Boolean(r) && r.status === "pending" && !(now - Date.parse(r.at ?? "") > REWRITE_STALE_MS);
+
+// ---- roadmap requests: the page's Roadmap tab records what the owner asks of ROADMAP.md (move,
+// remove, restore, dispatch). Nothing here touches ROADMAP.md: the main session carries a request
+// out by the repo's rules and records what became of it. `view` is roadmap.mjs's roadmapView of the
+// checkout, read just before the write, so an item id is checked against the file as it is now.
+export const ROADMAP_KINDS = ["reorder", "remove", "dispatch", "restore"];
+export const ROADMAP_STATUSES = ["new", "held", "sent", "filed", "done", "declined", "withdrawn"];
+export const ROADMAP_REQ_OPEN = new Set(["new", "held", "sent", "filed"]);
+export const DISPATCH_BRIEF_MAX = 2000;
+
+function findRoadmapRequest(raw, id) {
+  const r = arr(raw, "roadmapRequests").find((x) => x && String(x.id) === String(id));
+  if (!r) throw new Conflict(`no roadmap request with id "${id}"`);
+  return r;
+}
+
+const viewItem = (view, id) => {
+  for (const s of view?.sections ?? []) {
+    const it = (s.items ?? []).find((x) => x.id === id);
+    if (it) return { item: it, section: s };
+  }
+  return null;
+};
+
+const agents = (v, name) => {
+  if (v === undefined || v === null || v === "") return 0;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0 || n > 1) throw new Conflict(`${name} is 0 or 1`);
+  return n;
+};
+
+export function addRoadmapRequest(raw, { kind, itemId, to, dispatch, via = "page" }, view) {
+  if (!ROADMAP_KINDS.includes(kind)) throw new Conflict(`kind is ${ROADMAP_KINDS.join(", ")}`);
+  const id = typeof itemId === "string" ? itemId.trim() : "";
+  if (!id || id.length > 200) throw new Conflict("itemId is required");
+  if (view?.error) throw new Conflict(`the roadmap can't be read: ${view.error}`);
+  const list = arr(raw, "roadmapRequests");
+  let found = viewItem(view, id);
+  if (!found && kind === "restore") {
+    // A remove the main session already carried out took the item out of the file; restore names it
+    // by the earlier request.
+    const prior = [...list].reverse().find((r) => r && r.kind === "remove" && r.itemId === id && !["withdrawn", "declined"].includes(r.status));
+    if (prior) found = { item: { id, title: prior.itemTitle ?? "" }, section: { id: prior.section ?? "" } };
+  }
+  if (!found) throw new Conflict(`no roadmap item "${id}" in ${view?.source ?? "the roadmap"}`);
+  const req = { kind, itemId: id, itemTitle: String(found.item.title ?? ""), section: String(found.section.id ?? "") };
+  if (kind === "reorder") {
+    const t = to && typeof to === "object" ? to : {};
+    const anchor = (v, name) => {
+      if (v === undefined || v === null || v === "") return null;
+      if (typeof v !== "string") throw new Conflict(`to.${name} is an item id or null`);
+      if (v === id) throw new Conflict(`an item can't move ${name} itself`);
+      if (!viewItem(view, v)) throw new Conflict(`no roadmap item "${v}" to move ${name}`);
+      return v;
+    };
+    req.to = { after: anchor(t.after, "after"), before: anchor(t.before, "before") };
+  }
+  if (kind === "dispatch") {
+    const d = dispatch && typeof dispatch === "object" ? dispatch : {};
+    const brief = String(d.brief ?? "").trim();
+    if (brief.length > DISPATCH_BRIEF_MAX) throw new Conflict(`a dispatch brief is at most ${DISPATCH_BRIEF_MAX} characters`);
+    req.dispatch = { opus: agents(d.opus, "opus"), sonnet: agents(d.sonnet, "sonnet"), brief };
+  }
+  if (kind === "restore" && !list.some((r) => r && r.kind === "remove" && r.itemId === id && !["withdrawn", "declined"].includes(r.status))) {
+    throw new Conflict(`"${id}" has no remove request to undo`);
+  }
+  // The same request still waiting as new is a no-op, so a double click can't record it twice.
+  const dup = list.find(
+    (r) => r && r.status === "new" && r.kind === kind && r.itemId === id && sameJson(r.to ?? null, req.to ?? null) && sameJson(r.dispatch ?? null, req.dispatch ?? null),
+  );
+  if (dup) return { changed: false, id: dup.id, request: dup, note: "already requested" };
+  const n = list.reduce((m, r) => Math.max(m, Number(/^rq(\d+)$/.exec(String(r?.id))?.[1]) || 0), 0) + 1;
+  const at = localIso();
+  const record = { id: `rq${n}`, at, via, ...req, status: "new", statusAt: at, trail: [{ at, status: "new" }] };
+  list.push(record);
+  return { changed: true, id: record.id, request: record };
+}
+
+// What became of a request, with a note the page shows. Declining needs the reason.
+export function setRoadmapRequestStatus(raw, id, status, note) {
+  if (!["held", "sent", "filed", "done", "declined"].includes(status)) throw new Conflict("status is held, sent, filed, done or declined");
+  const r = findRoadmapRequest(raw, id);
+  const why = String(note ?? "").trim();
+  if (status === "declined" && !why) throw new Conflict("declining a roadmap request needs a note saying why");
+  if (r.status === status && (r.note ?? "") === why) return { changed: false, id: r.id, request: r };
+  r.status = status;
+  r.statusAt = localIso();
+  if (why) r.note = why;
+  else delete r.note;
+  arr(r, "trail").push({ at: r.statusAt, status, ...(why ? { note: why } : {}) });
+  return { changed: true, id: r.id, request: r };
+}
+
+// The owner taking a request back from the page. Only one nobody has picked up yet (still new).
+export function withdrawRoadmapRequest(raw, id) {
+  const r = findRoadmapRequest(raw, id);
+  if (r.status === "withdrawn") return { changed: false, id: r.id, request: r };
+  if ((r.status ?? "new") !== "new") throw new Conflict(`roadmap request "${r.id}" is already ${r.status}; it can't be withdrawn`);
+  r.status = "withdrawn";
+  r.statusAt = localIso();
+  arr(r, "trail").push({ at: r.statusAt, status: "withdrawn" });
+  return { changed: true, id: r.id, request: r };
 }
 
 const isActive = (s) => s.state === "active" || s.state === "doing";

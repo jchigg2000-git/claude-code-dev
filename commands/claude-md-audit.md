@@ -16,6 +16,10 @@ Run in two phases. Phase 1 (audit) is **read-only and always runs**. Phase 2 (ap
 
 ## Phase 1 — Audit (read-only)
 
+### Built-in doctors first
+
+Before discovery, the built-in doctors cover detection: `/doctor` (installation, unused extensions, duplicated or bloated memory files, slow hooks, permissions), `/doctor prompt-audit` (prompting written for older models; stale paths and contradictions first) and `/skill-doctor` (unused skills and their context cost). They're slash commands only the owner can type. If their output is already in this session, use it. Otherwise ask once, in one line, for the owner to run them and paste the result, or reply `skip`; then carry on either way. Treat their findings as input to the steps below; this command's own logic stays as written. `/doctor prompt-audit` findings on CLAUDE.md files feed the Staleness / contradictions check.
+
 ### Discovery & scope
 
 - Recursively find every `CLAUDE.md` under the root, plus the global `~/.claude/CLAUDE.md` if present. Use:

@@ -34,6 +34,10 @@ test("snapshot: live vs dormant, open questions, read-only", () => {
     questions: [
       { id: "q1", question: "Which way?", severity: "red", answer: null, askedAt: "2026-09-26T10:00:00Z" },
       { id: "q2", question: "Settled?", severity: "amber", answer: "yes" },
+      { id: "t1", origin: "owner", question: "Why so dear?", answer: null, actedAt: "2026-09-26T11:00:00Z",
+        thread: [{ id: "m1", from: "owner", text: "Why so dear?" }, { id: "m2", from: "agent", text: "Blanks." }] },
+      { id: "t2", origin: "owner", question: "Done yet?", answer: null,
+        thread: [{ id: "m1", from: "owner", text: "Done yet?", at: "2026-09-26T12:00:00Z" }] },
     ],
     findings: [
       { id: "f1", date: "2026-09-26", kind: "milestone", summary: "Merged the parser" },
@@ -51,6 +55,8 @@ test("snapshot: live vs dormant, open questions, read-only", () => {
   assert.deepEqual(s.live.map((b) => b.repo), ["alpha"]);
   assert.deepEqual(s.dormant.map((b) => b.repo), ["beta"]);
   assert.deepEqual(s.live[0].openQuestions.map((q) => [q.id, q.severity]), [["q1", "red"]]);
+  // Owner topics wait on the build, not the owner: never open questions; unanswered ones await a reply.
+  assert.deepEqual(s.live[0].awaitingReply.map((q) => [q.id, q.topic]), [["t2", true]]);
   assert.deepEqual(s.live[0].steps.active, ["Ship it"]);
   assert.deepEqual(s.live[0].helpers.map((h) => h.summary.slice(0, 7)), ["helper:"]);
   assert.equal(statSync(statePath).mtimeMs, before.mtime);

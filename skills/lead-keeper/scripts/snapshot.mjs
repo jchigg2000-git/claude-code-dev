@@ -12,7 +12,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { normalize } from "../../build-status/scripts/lib/normalize.mjs";
+import { isOpenQuestion, isOwnerTopic, isSettled, normalize, threadOf } from "../../build-status/scripts/lib/normalize.mjs";
 import { HOME_DIR, git, resolveCheckout } from "../../build-status/scripts/lib/paths.mjs";
 import { locate } from "../../build-status/scripts/lib/state.mjs";
 
@@ -85,9 +85,15 @@ function build(co, now, liveMs) {
     },
     gates: s.gates.map((g) => `${g.name}: ${g.status}`),
     note: clip(s.note, 200),
+    // Waiting on the owner: agent-asked questions with no answer (build-status's own rule).
     openQuestions: s.questions
-      .filter((q) => q.answer == null)
+      .filter(isOpenQuestion)
       .map((q) => ({ id: q.id, severity: q.severity || "amber", askedAt: q.askedAt || null, question: clip(q.question, 220) })),
+    // Waiting on the build: Q&A threads (owner topics or replies under a question) not yet settled
+    // whose last word is the owner's, so the lead can see one sit unanswered.
+    awaitingReply: s.questions
+      .filter((q) => !isSettled(q) && threadOf(q).at(-1)?.from === "owner")
+      .map((q) => ({ id: q.id, topic: isOwnerTopic(q), at: threadOf(q).at(-1).at || null, text: clip(threadOf(q).at(-1).text, 160) })),
     // The owner's page comments still open (new, held, sent), so the lead can see one sit past its
     // priority's window (lead/orders.md).
     openComments: s.comments

@@ -18,6 +18,8 @@ Dedupe everything by `message.id` (token usage) and by entry `uuid` (timestamps/
 
 **If a source is missing** (e.g. no transcripts found), say so plainly in the report and continue with whatever is available. Never fail the whole report because one source is absent. Never fabricate numbers to fill a gap.
 
+**Coverage — cloud sessions don't land here.** Sessions started in the iOS app, on claude.ai or from another cloud session never reach `~/.claude/projects/` unless teleported. Add one **coverage** line to the report saying which sessions it could see (local transcripts, vault, or both) and that cloud sessions are absent. When this runs inside a cloud session, read cloud transcripts with the remote session tools (`list_sessions`, `list_events`) if they're available. Where the owner has pasted `/insights` output, cross-check session totals against it.
+
 ## Step 1 — aggregate the transcripts with a script (do NOT read raw .jsonl into context)
 
 Transcripts are large. Save the script below to a temp file (e.g. `"$(mktemp).py"`) and run it with the repo path as its argument. Work from its JSON output, not the raw logs.

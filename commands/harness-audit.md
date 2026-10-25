@@ -43,6 +43,10 @@ cp -R <start-dir> ~/.claude/.harness-audit-backups/tree-<YYYYMMDD-HHMMSS>
 
 Use `date +%Y%m%d-%H%M%S`. If the start dir is huge, back up only the matched candidate files, preserving relative paths. Confirm the backup is non-empty before any deletion **or consolidation**. Prune backup folders older than ~90 days at the end (best-effort). If backup fails, **stop**.
 
+## Step 0.5 — Built-in doctors first
+
+Before inventory, the built-in doctors cover detection: `/doctor` (installation, unused extensions, duplicated or bloated memory files, slow hooks, permissions), `/doctor prompt-audit` (prompting written for older models; stale paths and contradictions first) and `/skill-doctor` (unused skills and their context cost). They're slash commands only the owner can type. If their output is already in this session, use it. Otherwise ask once, in one line, for the owner to run them and paste the result, or reply `skip`; then carry on either way. Treat their findings as input to the steps below; this command's own logic stays as written. A file the doctors flag as stale or duplicated still goes through Steps 2–5's rules; they don't add new delete paths.
+
 ## Step 1 — Inventory
 
 Build a table over every candidate file: `path | kind (command/skill/agent) | bytes | content hash | mtime | effective name | proposed action`. Compute the content hash with `shasum` (or `md5`) over the file body. `effective name` = filename without extension, or skill `name:` from frontmatter. Proposed action ∈ {keep, delete-empty, delete-duplicate, consolidate→<target>, needs-review}.

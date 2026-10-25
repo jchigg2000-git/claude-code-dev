@@ -1,5 +1,7 @@
 ---
 description: One-pass port-collision scan across every repo under a root — detects bound ports, identifies collisions, and writes a self-contained reassignment agent for each losing project into ./portFixAgents/. Never edits the losing repos, never builds a registry, never installs an MCP server (use generate-port-registry for the full flow). Re-runnable; overwrites agent files in place. Fire on `/port-collision-scan` or "scan for port collisions / find port conflicts across my projects."
+context: fork
+background: false
 ---
 
 # Claude Code Command: One-time port-collision scan

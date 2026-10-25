@@ -16,6 +16,8 @@ The earlier constraints in this session were scaffolding to get us to a known-go
 
 If $ARGUMENTS is empty, infer "done" from the trajectory of the session: finish the feature/refactor/task that was clearly in flight, including tests passing and a clean commit.
 
+**Make it a session goal.** Once "done" is known, set it as the session's `/goal` so a separate evaluator checks it before you stop and it survives `--resume`: use the ProposeGoal tool if it's available, otherwise print the exact `/goal <done condition>` line once for the owner to send. Then keep working; don't wait for it.
+
 **On failure.** If you hit something genuinely blocking (compile error you can't resolve, missing credential, ambiguous requirement that materially changes the design), commit current progress to a branch named `wip/unleash-<timestamp>`, write a BLOCKER.md explaining what stopped you and what you'd need, and exit. Do not spin.
 
 Begin now.

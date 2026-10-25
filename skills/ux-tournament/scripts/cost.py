@@ -11,8 +11,10 @@ Usage:
   cost.py --cwd <repo> [--session <id> | --latest] [--since ISO] [--until ISO] [--subagents-only] [--json]
   cost.py --project-dir ~/.claude/projects/<encoded> --session <id>
 
-Rates are $/MTok (input, output, cache_read, cache_write_5m, cache_write_1h). Verified 2026-09-19
-against the claude-api skill table (cached 2026-06-24). Re-verify when a model changes.
+Rates are $/MTok (input, output, cache_read, cache_write_5m, cache_write_1h). Verified 2026-10-25
+against the Claude Code changelog (2.1.293 Haiku 5.5, 2.1.296 Sonnet 5.5 cache reads). Re-verify when a
+model changes. Haiku 5.5 has a long-prompt tier above 100K tokens (0.5 / 2.5 / 0.05 / 0.625 / 1.0) that
+this meter doesn't model; it prices every Haiku 5.5 prompt at the base tier.
 """
 import argparse, glob, json, os, re, sys
 
@@ -25,8 +27,10 @@ RATES = {
     "claude-opus-4-8":  (5.0, 25.0, 0.50, 6.25, 10.0),
     "claude-opus-4-7":  (5.0, 25.0, 0.50, 6.25, 10.0),
     "claude-opus-4-6":  (5.0, 25.0, 0.50, 6.25, 10.0),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.10, 2.5, 4.0),  # 2.1.296 repriced cache reads to $0.10
     "claude-sonnet-5":  (2.0, 10.0, 0.20, 2.5, 4.0),
     "claude-sonnet-4-6": (3.0, 15.0, 0.30, 3.75, 6.0),
+    "claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125, 0.20),  # prompts over 100K: 0.5 / 2.5 / 0.05 / 0.625 / 1.0
     "claude-haiku-4-5": (1.0, 5.0, 0.10, 1.25, 2.0),
 }
 TIER = {"fable": "fable", "mythos": "fable", "opus": "opus", "sonnet": "sonnet", "haiku": "haiku"}

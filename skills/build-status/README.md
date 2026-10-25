@@ -7,8 +7,9 @@ opens in your browser, then updates itself as the work moves along. It shows:
 - **Commits:** the recent git history for this piece of work.
 - **Checks:** whether tests, lint and the other quality checks the repo has are passing.
 - **Findings:** things worth knowing that turned up along the way.
-- **Questions for you:** decisions Claude needs from you. Answer on the page and the answer goes
-  back to the session.
+- **Q&A:** decisions Claude needs from you, each with a conversation underneath. Answer on the
+  page, reply to talk it through, or start a topic of your own with "Ask the build"; your answers
+  and messages go back to the session, and its replies appear in the thread.
 - **A comment box:** leave a note at low, normal, high or urgent priority. The priority sets how
   soon the working session hears it, as long as something in that session is watching for comments.
 
@@ -31,8 +32,8 @@ SKILL.md                 the LLM half (153 lines; the old command was 1,563)
 install.mjs              install / --rollback (moves the old ~/.claude/commands/build-status.md aside and back)
 hooks/hooks.json         opt-in: answers into sessions (SessionStart, UserPromptSubmit), post-edit repair
 hooks/hooks.stop.json    opt-in: Stop-hook delivery for looping builds (verified live on Claude Code 2.1.283)
-scripts/cli.mjs          verbs: finding ask answer step note phase next-phase gate init confirm
-                         locate status answers await render stop ls hook hooks-snippet version
+scripts/cli.mjs          verbs: finding ask answer reply thread acted step note phase next-phase gate init
+                         confirm locate status answers await render stop ls hook hooks-snippet version
 scripts/lib/
   paths.mjs              checkout identity, per-worktree files in the git dir, ~/.build-status layout
   write.mjs              the one write path: O_EXCL lock (broken only if its holder is dead),
