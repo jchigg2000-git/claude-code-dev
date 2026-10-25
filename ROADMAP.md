@@ -33,6 +33,13 @@ carries, which are content, not plan items.
   gate's `SOURCE_ROOTS`: a change there is a sync of content authored in `~/.claude/`, not a
   unit of work this file tracks, and including them would fire the gate on every
   `/sync-claude-slash --ship`. Revisit only if the mirror starts carrying original work.
+- ⬜ **MIRROR-9 `feature-fold` scheduled task.** A weekly cloud routine (`feature-fold`,
+  Mondays 13:48 UTC, claude.ai/code/routines/trig_01B7P4XJPRUE6b3Aii5aQwf5) reads the Claude Code
+  changelog and writes cards and patches only under `docs/feature-fold/` on the rolling branch
+  `claude/feature-fold`, with one draft PR. It may open draft pricing PRs on `claude-code-log`.
+  `/fold-features` on the Mac is its only write path into `~/.claude`. If four runs in a row
+  bring only WATCH cards, ask the owner about moving it to every other week.
+
 ### Parked ideas
 None.
 
