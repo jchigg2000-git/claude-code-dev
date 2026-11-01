@@ -40,6 +40,12 @@ carries, which are content, not plan items.
   `/fold-features` on the Mac is its only write path into `~/.claude`. If four runs in a row
   bring only WATCH cards, ask the owner about moving it to every other week.
 
+- ⬜ **MIRROR-10 Sync hold list.** Owner-ratified (DECISIONS.md 2026-10-25): the mirror's
+  `skills/prompt-improver/` stays frozen at its current copy. `sync-claude-slash` Phase 1 has no way
+  to skip an existing skill, so add a hold list (e.g. `.provenance/hold.txt`) it reads before
+  updating. Until then, every sync must skip `skills/prompt-improver/` by hand, or it publishes
+  `meter.py` and `calibration.json`.
+
 ### Parked ideas
 None.
 
@@ -78,8 +84,9 @@ to prove the install path. If PLUG-1 moves files, PLUG-4 has to land first.
     from this Mac carry them.
   - Anything newly public gets a human brand-scrub read. The automated scrub gate has no pattern
     file and no callers, so never cite it as proof of clean.
-- ⬜ **PLUG-2 Grouping** `CLAUDE-ORIGIN` (proposed in a ~/Projects session 2026-09-26, not
-  ratified; re-derive before treating as binding). First slice: `harden` + `machine-health`.
+- ⬜ **PLUG-2 Grouping.** First slice `harden` + `machine-health` is owner-ratified (DECISIONS.md
+  2026-10-25). The other five groupings below are still `CLAUDE-ORIGIN` (proposed in a ~/Projects
+  session 2026-09-26, not ratified; re-derive before treating as binding).
 
   | Plugin | Contents |
   |---|---|
@@ -134,15 +141,13 @@ All `CLAUDE-ORIGIN`: proposed by the 2.1.310 harness-update handoff, not yet dec
   `diagramsystemflow`, `audit-burden`, `port-collision-scan`). These two were held back because
   they spawn subagents (pathfinder's parallel investigations, gen-sys-doc's refuter), and it is
   unconfirmed whether a forked run can. Fork them only after confirming it can.
-- ⬜ **HARN-2 Sweeps on a schedule** `CLAUDE-ORIGIN`. Desktop scheduled tasks run on the Mac,
-  load `~/.claude/skills/` and can use a fresh worktree per run; they fit the `~/Projects`
-  walkers (`wip-reconciler`, `autonomous-doc-refresh`, `test-backfill`) and could replace the
-  launchd jobs (`doc-hygiene-sweep`, `sysdoc-staleness`). Cloud scheduled tasks (`/schedule`)
-  run with the Mac off but see only attached repos and not `~/.claude`; they fit report-only
-  sweeps over a fixed repo list (`security-sweep`, `license-compliance`, `deadlink-check`,
-  `config-drift`, `deploy-health`) and need the cloud setup script or account skills to find
-  the skill. Spike `wip-reconciler` locally and `deadlink-check` in the cloud. A scheduled
-  sweep's output is its report; the never-commit rule holds.
+- ⬜ **HARN-2 Sweeps on Desktop scheduled tasks.** Owner-ratified scope (DECISIONS.md
+  2026-10-25): Desktop only, no cloud sweeps. Desktop tasks run on the Mac, load
+  `~/.claude/skills/`, can use a fresh worktree per run, and fire while the Desktop app is open and
+  the Mac is awake. Move the `~/Projects` walkers (`wip-reconciler`, `autonomous-doc-refresh`,
+  `test-backfill`) and the launchd jobs (`doc-hygiene-sweep`, `sysdoc-staleness`) onto them.
+  Spike `wip-reconciler` first; launchd stays until it passes. A scheduled sweep's output is its
+  report; the never-commit rule holds.
 - ⬜ **HARN-3 `build-status` readable from the phone** `CLAUDE-ORIGIN`. The page is served on
   the Mac's localhost. Spike a private Artifact copy first (the phone can open it); a Claude Mod
   pane (2.1.287, `plugin-authoring`) is the other route.
@@ -168,3 +173,13 @@ All `CLAUDE-ORIGIN`: proposed by the 2.1.310 harness-update handoff, not yet dec
   (`name`, `description`, `license`, `compatibility`, `metadata`, `allowed-tools`); a file with
   `argument-hint`, `context` or `disable-model-invocation` fails with "Unexpected key(s)". Use it
   only for a few skills wanted everywhere, with trimmed frontmatter.
+
+## §4 Open decisions
+
+- 🔬 **OPEN — Commands → skills migration (HARN-5).** Deferred 2026-10-25 by you. **Meanwhile:**
+  plugin work (PLUG-1/4/5) can't safely start, since its layout, gate and path rewrites would need
+  redoing after a migration; `commands/` stays as is. Evidence: ROADMAP §3 HARN-5. *(question
+  authored by me — CLAUDE-ORIGIN; the deferral is yours)*
+- `CLAUDE-ORIGIN` still unasked, for the next `/ask-me` to re-rank: HARN-3 (phone-readable
+  build-status: Artifact vs Mod), HARN-6 (recurring inventory prompt as a skill), PLUG-3 (what stays
+  out of the marketplace).
