@@ -173,14 +173,6 @@ All `CLAUDE-ORIGIN`: proposed by the 2.1.310 harness-update handoff, not yet dec
   (`name`, `description`, `license`, `compatibility`, `metadata`, `allowed-tools`); a file with
   `argument-hint`, `context` or `disable-model-invocation` fails with "Unexpected key(s)". Use it
   only for a few skills wanted everywhere, with trimmed frontmatter.
-- ⬜ **HARN-9 Enforce `self-improve-loop`'s write boundary** `CLAUDE-ORIGIN`. Card
-  `ff-2026-11-02-01`, deferred at the 2026-11-03 fold because the owner hadn't answered. 2.1.314's
-  `permissions.blockWritesOutsideWorkingDirectories` makes Write, Edit and NotebookEdit refuse paths
-  outside the working directories in every permission mode; today only prose enforces the rule
-  (`skills/self-improve-loop/SKILL.md:14`, `:36`). Set it per target repo or with `--settings`, never
-  in `~/.claude/settings.json`, where it would block `/fold-features` and `/sync-claude-slash`. It
-  doesn't cover Bash writes. Test in a scratch repo: Write to `/tmp/ff-test.txt` is refused, a Write
-  inside the repo succeeds.
 
 ## §4 Open decisions
 
