@@ -1,5 +1,5 @@
 {
-  "last_version_seen": "2.1.316",
+  "last_version_seen": "2.1.319",
   "applied_through": "2.1.316",
   "runs": [
     {
@@ -24,6 +24,14 @@
       "to": "2.1.316",
       "cards": 3,
       "patches": 0,
+      "pricing_pr": null
+    },
+    {
+      "date": "2026-11-09",
+      "from": "2.1.316",
+      "to": "2.1.319",
+      "cards": 3,
+      "patches": 1,
       "pricing_pr": null
     }
   ]
