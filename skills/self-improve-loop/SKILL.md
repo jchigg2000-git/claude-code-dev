@@ -35,6 +35,18 @@ survives fresh contexts and resumes without re-analyzing.
 - **Scope.** Only the repo the skill is invoked in. Never touch other repos, never edit
   files outside the working tree. First thing the loop does is confirm it is inside a git
   work tree (`git rev-parse --show-toplevel`); that path is the boundary for everything.
+- **Enforce the boundary.** Straight after that check, from the repo root, make the tools enforce
+  it. This takes effect in the running session:
+  ```sh
+  f=.claude/settings.local.json; [ -f "$f" ] || echo '{}' > "$f"
+  jq '.permissions.blockWritesOutsideWorkingDirectories = true' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  ```
+  Write, Edit and NotebookEdit then refuse paths outside the working directories in every
+  permission mode. If the key wasn't already true, set `write_block_added: true` in the ledger's
+  run metadata. Make sure `.claude/settings.local.json` is in the repo's `.gitignore`: it must never
+  ride along in a `/shipit` commit. Never set this in `~/.claude/settings.json`, where it would block
+  harness skills that write under `~/.claude`. It doesn't cover Bash, so the scope rule above still
+  binds Bash writes.
 - **Focus areas (the ONLY eligible work).** Rank and select the backlog strictly within
   these five:
   1. **Security hardening**
@@ -242,8 +254,13 @@ Then loop back to step 1.
   polled condition.
 - **Backlog empty AND a re-analysis pass surfaces nothing eligible.**
 
-On stop: write the **Closeout** section to the ledger and **print to the user:
-done / not done / unverified / risky.**
+On stop: if the ledger says `write_block_added: true`, remove the setting so it doesn't outlive the
+run (`jq 'del(.permissions.blockWritesOutsideWorkingDirectories)'` on
+`.claude/settings.local.json`). Then write the **Closeout** section to the ledger and **print to the user:
+done / not done / unverified / risky.** Then, if the run taught something (an item that shipped
+very differently from how it ranked, a risk-envelope call that was wrong, a /ratchet-up that
+cost more than it was worth), append one diary entry:
+`python3 -I ~/.claude/skills/telegraph/scripts/telegraph.py diary append self-improve-loop --scope <repo> "<happened>" "<learned>"`. Entry rules: write one only when there's a lesson, at most one per run or session plus one per owner correction. Keep it to about 60 words with at most 2 sentences per field; the CLI refuses longer ones. Cite ledger ids and never copy rows. No secrets, client brand names, orders or to-dos (those go in the ledgers). The CLI stamps the date and the station. On a station without `~/Projects/agent-diaries` it posts the entry over the telegraph, and the home station files it.
 
 ---
 
@@ -267,11 +284,14 @@ done / not done / unverified / risky.**
 
 On invocation, before anything else:
 
-1. `git rev-parse --show-toplevel` → confirm we're in a repo; that's the scope boundary.
+1. `git rev-parse --show-toplevel` → confirm we're in a repo; that's the scope boundary. Apply
+   **Enforce the boundary** above.
 2. Read `.claude/self-improve-ledger.md` if present.
    - **No ledger, or `hard_deadline_epoch` already passed / `status: stopped`** → run
      **Phase 1** fresh (a passed deadline means a prior run completed; start a new run only
      if the user clearly wants another pass).
    - **Live ledger (`status: looping`, deadline in the future)** → **skip Phase 1**, pick up
      any `in_progress` item first, then continue **Phase 2** from the ranked backlog.
-3. Re-stamp `last_touched_epoch` and proceed.
+3. Read the diary once: `python3 -I ~/.claude/skills/telegraph/scripts/telegraph.py diary read self-improve-loop`. It holds lessons from runs in
+   every repo; this repo's state stays in the ledger.
+4. Re-stamp `last_touched_epoch` and proceed.
