@@ -1,0 +1,50 @@
+diff --git a/skills/autonomous-sweep-core/SKILL.md b/skills/autonomous-sweep-core/SKILL.md
+index 7823001..82697db 100644
+--- a/skills/autonomous-sweep-core/SKILL.md
++++ b/skills/autonomous-sweep-core/SKILL.md
+@@ -41,7 +41,9 @@ A "unit" is one repo by default; a detector may narrow it (e.g. one Railway serv
+ 3. Write the ledger: a markdown table with one row per unit —
+    `# | unit | last-commit | status=pending | <detector result columns> | note`,
+    plus a "Run summary" placeholder and a "Per-unit detail log" section.
+-4. Stop. The next iteration starts the work.
++4. Schedule the next iteration (`ScheduleWakeup`, ~60s, same loop prompt) and end the turn.
++   A self-paced `/loop` ends at any turn that finishes without rescheduling (Claude Code
++   2.1.319+), so iteration 0 must reschedule too — a bare stop here ends the sweep.
+ 
+ **Each later iteration — process the FIRST `pending` row only:**
+ 1. Read the ledger, pick the first `status=pending` row → that unit.
+@@ -52,6 +54,9 @@ A "unit" is one repo by default; a detector may narrow it (e.g. one Railway serv
+ 
+ Drive the loop with `ScheduleWakeup` (self-paced) OR just continue turn-by-turn. Mid-iteration,
+ fan out background agents — their completion notifications re-enter the iteration.
++Under self-paced `/loop`, every turn except the last must call `ScheduleWakeup` before it
++ends — including a turn that ends to wait on background work (schedule a 1200s+ fallback
++then; the completion notification still wakes it sooner).
+ 
+ ## The per-unit shape (what every detector implements)
+ 
+diff --git a/skills/autonomous-doc-refresh/SKILL.md b/skills/autonomous-doc-refresh/SKILL.md
+index 4717377..3fc1ca1 100644
+--- a/skills/autonomous-doc-refresh/SKILL.md
++++ b/skills/autonomous-doc-refresh/SKILL.md
+@@ -31,7 +31,9 @@ even when context is summarized between iterations). Proven on a 20-repo run.
+ 3. Write the ledger: a markdown table with one row per repo —
+    `# | repo | last-commit | status=pending | updated | generated | skipped-fresh | flagged | note`,
+    plus a "Run summary" placeholder and a "Per-repo detail log" section.
+-4. Stop. The next iteration starts the work.
++4. Schedule the next iteration (`ScheduleWakeup`, ~60s, same loop prompt) and end the turn.
++   A self-paced `/loop` ends at any turn that finishes without rescheduling (Claude Code
++   2.1.319+), so iteration 0 must reschedule too — a bare stop here ends the sweep.
+ 
+ **Each later iteration — process the FIRST `pending` row only:**
+ 1. Read the ledger, pick the first `status=pending` row → that repo.
+@@ -42,6 +44,9 @@ even when context is summarized between iterations). Proven on a 20-repo run.
+ 
+ Drive the loop with `ScheduleWakeup` (self-paced) OR just continue turn-by-turn. Mid-iteration,
+ launch background `Workflow`s / agents — their completion notifications re-enter the iteration.
++Under self-paced `/loop`, every turn except the last must call `ScheduleWakeup` before it
++ends — including a turn that ends to wait on background work (schedule a 1200s+ fallback
++then; the completion notification still wakes it sooner).
+ 
+ ## Per-repo refresh (the core)
+ 
